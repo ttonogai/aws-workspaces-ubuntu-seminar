@@ -1,0 +1,22 @@
+[
+  {
+    "ParameterKey": "ProjectName",
+    "ParameterValue": "aws-seminar"
+  },
+  {
+    "ParameterKey": "DirectoryName",
+    "ParameterValue": "seminar.internal"
+  },
+  {
+    "ParameterKey": "DirectoryShortName",
+    "ParameterValue": "SEMINAR"
+  },
+  {
+    "ParameterKey": "DirectoryAdminPassword",
+    "ParameterValue": "AIseminar123!"
+  },
+  {
+    "ParameterKey": "DirectoryEdition",
+    "ParameterValue": "Standard"
+  }
+]

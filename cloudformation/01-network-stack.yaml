@@ -1,0 +1,427 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'AWS Seminar - Network Stack (Single AZ, Secure Configuration) - Ubuntu WorkSpaces'
+
+Parameters:
+  ProjectName:
+    Type: String
+    Default: aws-seminar
+    Description: Project name for resource naming
+  
+  VpcCidr:
+    Type: String
+    Default: 10.0.0.0/16
+    Description: CIDR block for VPC
+  
+  PrivateSubnetCidr:
+    Type: String
+    Default: 10.0.1.0/24
+    Description: CIDR block for private subnet 1 (WorkSpaces)
+  
+  PrivateSubnet2Cidr:
+    Type: String
+    Default: 10.0.2.0/24
+    Description: CIDR block for private subnet 2 (Directory Service)
+  
+  PublicSubnetCidr:
+    Type: String
+    Default: 10.0.101.0/24
+    Description: CIDR block for public subnet (NAT Gateway)
+  
+  AllowedIpRange:
+    Type: String
+    Default: 0.0.0.0/0
+    Description: Allowed IP range for WorkSpaces access (セミナー会場のIPに変更推奨)
+    AllowedPattern: '^(\d{1,3}\.){3}\d{1,3}/\d{1,2}$'
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: Network Configuration
+        Parameters:
+          - ProjectName
+          - VpcCidr
+          - PrivateSubnetCidr
+          - PrivateSubnet2Cidr
+          - PublicSubnetCidr
+      - Label:
+          default: Security Configuration
+        Parameters:
+          - AllowedIpRange
+
+Resources:
+  # VPC
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref VpcCidr
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-vpc'
+        - Key: Project
+          Value: !Ref ProjectName
+
+  # Internet Gateway
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-igw'
+        - Key: Project
+          Value: !Ref ProjectName
+
+  AttachGateway:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref VPC
+      InternetGatewayId: !Ref InternetGateway
+
+  # Private Subnet 1 (WorkSpaces)
+  PrivateSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: !Ref PrivateSubnetCidr
+      AvailabilityZone: !Select [0, !GetAZs '']
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-private-subnet-1a'
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Type
+          Value: Private
+
+  # Private Subnet 2 (Directory Service)
+  PrivateSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: !Ref PrivateSubnet2Cidr
+      AvailabilityZone: !Select [1, !GetAZs '']
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-private-subnet-1c'
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Type
+          Value: Private
+
+  # Public Subnet (NAT Gateway)
+  PublicSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: !Ref PublicSubnetCidr
+      AvailabilityZone: !Select [0, !GetAZs '']
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-public-subnet-1a'
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Type
+          Value: Public
+
+  # Elastic IP for NAT Gateway
+  NatGatewayEIP:
+    Type: AWS::EC2::EIP
+    DependsOn: AttachGateway
+    Properties:
+      Domain: vpc
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-nat-eip'
+        - Key: Project
+          Value: !Ref ProjectName
+
+  # NAT Gateway
+  NatGateway:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt NatGatewayEIP.AllocationId
+      SubnetId: !Ref PublicSubnet
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-nat-gateway'
+        - Key: Project
+          Value: !Ref ProjectName
+
+  # Route Table for Public Subnet
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-public-rt'
+        - Key: Project
+          Value: !Ref ProjectName
+
+  PublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: AttachGateway
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  PublicSubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet
+      RouteTableId: !Ref PublicRouteTable
+
+  # Route Table for Private Subnet
+  PrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-private-rt'
+        - Key: Project
+          Value: !Ref ProjectName
+
+  PrivateRoute:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGateway
+
+  PrivateSubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnet
+      RouteTableId: !Ref PrivateRouteTable
+
+  PrivateSubnet2RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnet2
+      RouteTableId: !Ref PrivateRouteTable
+
+  # VPC Endpoints (コスト削減 + セキュリティ強化)
+  S3Endpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcId: !Ref VPC
+      ServiceName: !Sub 'com.amazonaws.${AWS::Region}.s3'
+      RouteTableIds:
+        - !Ref PrivateRouteTable
+      VpcEndpointType: Gateway
+
+  WorkSpacesEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcId: !Ref VPC
+      ServiceName: !Sub 'com.amazonaws.${AWS::Region}.workspaces'
+      VpcEndpointType: Interface
+      PrivateDnsEnabled: true
+      SubnetIds:
+        - !Ref PrivateSubnet
+        - !Ref PrivateSubnet2
+      SecurityGroupIds:
+        - !Ref VPCEndpointSecurityGroup
+
+  # Security Group for VPC Endpoints
+  VPCEndpointSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub '${ProjectName}-vpce-sg'
+      GroupDescription: Security group for VPC Endpoints
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          SourceSecurityGroupId: !Ref WorkSpacesSecurityGroup
+          Description: HTTPS from WorkSpaces
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-vpce-sg'
+        - Key: Project
+          Value: !Ref ProjectName
+
+  # Security Group for WorkSpaces (Ubuntu optimized)
+  WorkSpacesSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub '${ProjectName}-workspaces-sg'
+      GroupDescription: Security group for Ubuntu WorkSpaces (Least Privilege)
+      VpcId: !Ref VPC
+      SecurityGroupEgress:
+        # HTTPS - AWS API、Kiro更新、MCP通信
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+          Description: HTTPS for AWS APIs, Kiro updates, MCP
+        # HTTP - パッケージ更新（Ubuntu apt）
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+          Description: HTTP for Ubuntu package updates
+        # DNS
+        - IpProtocol: tcp
+          FromPort: 53
+          ToPort: 53
+          CidrIp: 0.0.0.0/0
+          Description: DNS TCP
+        - IpProtocol: udp
+          FromPort: 53
+          ToPort: 53
+          CidrIp: 0.0.0.0/0
+          Description: DNS UDP
+        # NTP (時刻同期)
+        - IpProtocol: udp
+          FromPort: 123
+          ToPort: 123
+          CidrIp: 0.0.0.0/0
+          Description: NTP for time synchronization
+        # SSH (Ubuntu管理用 - 必要に応じて)
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 10.0.0.0/16
+          Description: SSH for Ubuntu management (VPC only)
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-workspaces-sg'
+        - Key: Project
+          Value: !Ref ProjectName
+
+  # Security Group for Directory Service
+  DirectorySecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub '${ProjectName}-directory-sg'
+      GroupDescription: Security group for AWS Managed Microsoft AD
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        # Kerberos
+        - IpProtocol: tcp
+          FromPort: 88
+          ToPort: 88
+          SourceSecurityGroupId: !Ref WorkSpacesSecurityGroup
+          Description: Kerberos TCP from WorkSpaces
+        - IpProtocol: udp
+          FromPort: 88
+          ToPort: 88
+          SourceSecurityGroupId: !Ref WorkSpacesSecurityGroup
+          Description: Kerberos UDP from WorkSpaces
+        # DNS
+        - IpProtocol: tcp
+          FromPort: 53
+          ToPort: 53
+          SourceSecurityGroupId: !Ref WorkSpacesSecurityGroup
+          Description: DNS TCP from WorkSpaces
+        - IpProtocol: udp
+          FromPort: 53
+          ToPort: 53
+          SourceSecurityGroupId: !Ref WorkSpacesSecurityGroup
+          Description: DNS UDP from WorkSpaces
+        # LDAP
+        - IpProtocol: tcp
+          FromPort: 389
+          ToPort: 389
+          SourceSecurityGroupId: !Ref WorkSpacesSecurityGroup
+          Description: LDAP from WorkSpaces
+        - IpProtocol: udp
+          FromPort: 389
+          ToPort: 389
+          SourceSecurityGroupId: !Ref WorkSpacesSecurityGroup
+          Description: LDAP UDP from WorkSpaces
+        # LDAPS
+        - IpProtocol: tcp
+          FromPort: 636
+          ToPort: 636
+          SourceSecurityGroupId: !Ref WorkSpacesSecurityGroup
+          Description: LDAPS from WorkSpaces
+        # Global Catalog
+        - IpProtocol: tcp
+          FromPort: 3268
+          ToPort: 3269
+          SourceSecurityGroupId: !Ref WorkSpacesSecurityGroup
+          Description: Global Catalog from WorkSpaces
+        # SMB
+        - IpProtocol: tcp
+          FromPort: 445
+          ToPort: 445
+          SourceSecurityGroupId: !Ref WorkSpacesSecurityGroup
+          Description: SMB from WorkSpaces
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+          Description: Allow all outbound
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-directory-sg'
+        - Key: Project
+          Value: !Ref ProjectName
+
+  # Self-referencing rule for Directory (AD間通信)
+  DirectorySelfIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref DirectorySecurityGroup
+      IpProtocol: -1
+      SourceSecurityGroupId: !Ref DirectorySecurityGroup
+      Description: Allow all traffic between directory servers
+
+Outputs:
+  VpcId:
+    Description: VPC ID
+    Value: !Ref VPC
+    Export:
+      Name: !Sub '${ProjectName}-vpc-id'
+
+  PrivateSubnetId:
+    Description: Private Subnet ID for WorkSpaces
+    Value: !Ref PrivateSubnet
+    Export:
+      Name: !Sub '${ProjectName}-private-subnet-id'
+
+  PrivateSubnet2Id:
+    Description: Private Subnet 2 ID for Directory Service
+    Value: !Ref PrivateSubnet2
+    Export:
+      Name: !Sub '${ProjectName}-private-subnet-2-id'
+
+  PublicSubnetId:
+    Description: Public Subnet ID for NAT Gateway
+    Value: !Ref PublicSubnet
+    Export:
+      Name: !Sub '${ProjectName}-public-subnet-id'
+
+  WorkSpacesSecurityGroupId:
+    Description: Security Group ID for WorkSpaces
+    Value: !Ref WorkSpacesSecurityGroup
+    Export:
+      Name: !Sub '${ProjectName}-workspaces-sg-id'
+
+  DirectorySecurityGroupId:
+    Description: Security Group ID for Directory Service
+    Value: !Ref DirectorySecurityGroup
+    Export:
+      Name: !Sub '${ProjectName}-directory-sg-id'
+
+  AllowedIpRange:
+    Description: Allowed IP range for WorkSpaces access
+    Value: !Ref AllowedIpRange
+    Export:
+      Name: !Sub '${ProjectName}-allowed-ip-range'
+
+  NatGatewayId:
+    Description: NAT Gateway ID
+    Value: !Ref NatGateway
+
+  NatGatewayEIP:
+    Description: NAT Gateway Elastic IP
+    Value: !Ref NatGatewayEIP

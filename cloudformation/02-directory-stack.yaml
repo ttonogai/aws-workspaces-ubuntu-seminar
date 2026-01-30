@@ -1,0 +1,97 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'AWS Seminar - Directory Stack (AWS Managed Microsoft AD) - Ubuntu WorkSpaces'
+
+Parameters:
+  ProjectName:
+    Type: String
+    Default: aws-seminar
+    Description: Project name for resource naming
+  
+  DirectoryName:
+    Type: String
+    Default: seminar.internal
+    Description: Fully qualified domain name for the directory
+  
+  DirectoryShortName:
+    Type: String
+    Default: SEMINAR
+    Description: NetBIOS name for the directory
+  
+  DirectoryAdminPassword:
+    Type: String
+    NoEcho: true
+    MinLength: 8
+    MaxLength: 64
+    Description: Password for the directory administrator (Admin user)
+    AllowedPattern: '^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$'
+    ConstraintDescription: Must contain at least 8 characters with uppercase, lowercase, number, and special character
+  
+  DirectoryEdition:
+    Type: String
+    Default: Standard
+    AllowedValues:
+      - Standard
+      - Enterprise
+    Description: Directory edition (Standard for testing, Enterprise for production)
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: Directory Configuration
+        Parameters:
+          - ProjectName
+          - DirectoryName
+          - DirectoryShortName
+          - DirectoryEdition
+      - Label:
+          default: Security Configuration
+        Parameters:
+          - DirectoryAdminPassword
+    ParameterLabels:
+      DirectoryAdminPassword:
+        default: 'Admin Password (8+ chars, mixed case, number, special char)'
+
+Resources:
+  # AWS Managed Microsoft AD
+  ManagedAD:
+    Type: AWS::DirectoryService::MicrosoftAD
+    Properties:
+      Name: !Ref DirectoryName
+      ShortName: !Ref DirectoryShortName
+      Password: !Ref DirectoryAdminPassword
+      Edition: !Ref DirectoryEdition
+      VpcSettings:
+        VpcId:
+          Fn::ImportValue: !Sub '${ProjectName}-vpc-id'
+        SubnetIds:
+          # 2つの異なるサブネットが必要
+          - Fn::ImportValue: !Sub '${ProjectName}-private-subnet-id'
+          - Fn::ImportValue: !Sub '${ProjectName}-private-subnet-2-id'
+
+  # WorkSpaces Directory Registration
+  # Note: AWS::WorkSpaces::WorkspacesDirectory is not supported in CloudFormation
+  # Use AWS CLI script to register directory with WorkSpaces after stack creation
+
+Outputs:
+  DirectoryId:
+    Description: Directory Service ID
+    Value: !Ref ManagedAD
+    Export:
+      Name: !Sub '${ProjectName}-directory-id'
+
+  DirectoryName:
+    Description: Directory DNS name
+    Value: !Ref DirectoryName
+    Export:
+      Name: !Sub '${ProjectName}-directory-name'
+
+  DirectoryDnsIpAddresses:
+    Description: DNS IP addresses for the directory
+    Value: !Join
+      - ','
+      - !GetAtt ManagedAD.DnsIpAddresses
+
+  DirectoryAlias:
+    Description: Directory alias for WorkSpaces access
+    Value: !GetAtt ManagedAD.Alias

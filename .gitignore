@@ -1,0 +1,45 @@
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Logs
+*.log
+logs/
+
+# AWS credentials and config
+.aws/
+aws-credentials.json
+
+# CloudFormation outputs
+*-outputs.json
+
+# Temporary files
+*.tmp
+*.temp
+temp/
+tmp/
+
+# Generated CSV files
+*-users.csv
+workspaces-users.csv
+ubuntu-workspaces-users.csv
+
+# Backup files
+*.bak
+*.backup
+
+# Local configuration overrides
+parameters.local.json
+config.local.json
