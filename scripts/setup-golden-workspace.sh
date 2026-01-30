@@ -181,7 +181,7 @@ create_sample_projects() {
     
     # 全ユーザー用のサンプルディレクトリ作成
     sudo mkdir -p /opt/kiro-samples
-    sudo chown -R $USER:$USER /opt/kiro-samples
+    sudo chown -R $(whoami):$(id -gn) /opt/kiro-samples
     
     cd /opt/kiro-samples
     
