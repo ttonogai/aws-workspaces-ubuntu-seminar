@@ -198,41 +198,67 @@ aws workspaces describe-workspaces --directory-id <DIRECTORY_ID> --region ap-nor
 
 **重要**: 全ユーザーが使用できるように、共通の場所にインストール・配置してください。
 
-##### Step 1: システム更新
+##### 自動セットアップスクリプト実行（推奨）
+
+```bash
+# GitHubからリポジトリをクローン
+git clone https://github.com/ttonogai/aws-workspaces-ubuntu-seminar.git
+cd aws-workspaces-ubuntu-seminar
+
+# セットアップスクリプトを実行
+./aws-seminar/scripts/setup-golden-workspace.sh
+```
+
+**スクリプトの実行内容**:
+1. システム更新とパッケージインストール
+2. 日本語対応設定（最小限）
+3. Node.js LTS インストール
+4. Kiro IDE インストール
+5. サンプルプロジェクト作成
+6. 新規ユーザー用テンプレート設定
+7. Dock お気に入り設定
+
+**所要時間**: 約15-30分
+
+**事前準備**:
+- Kiro IDE の .deb ファイルをブラウザでダウンロード
+  1. https://kiro.dev にアクセス
+  2. Linux版 (.deb) をダウンロード
+  3. ダウンロードフォルダに保存
+
+**実行中の注意**:
+- sudo パスワードを求められます
+- Kiro .deb ファイルのダウンロード確認で一時停止します
+- y/N の確認で進行します
+
+##### 手動セットアップ（参考）
+
+自動スクリプトが使用できない場合の手動手順：
+
+**Step 1: システム更新**
 
 ```bash
 # システム更新
 sudo apt update && sudo apt upgrade -y
 
 # 必要なパッケージインストール
-sudo apt install -y curl wget git build-essential software-properties-common
+sudo apt install -y curl wget git build-essential software-properties-common unzip tree htop vim nano
 ```
 
-##### Step 2: 日本語対応設定（ブラウザ + Kiro）
+**Step 2: 日本語対応設定（最小限）**
 
 ```bash
-# 最小限の日本語対応（推奨）
-sudo apt update
-
 # 日本語フォントと入力システム
-sudo apt install -y fonts-noto-cjk ibus-mozc
+sudo apt install -y fonts-noto-cjk fonts-noto-cjk-extra ibus-mozc language-pack-ja
 
 # ブラウザ日本語化
 sudo apt install -y firefox-locale-ja chromium-browser-l10n
 
 # タイムゾーン設定
 sudo timedatectl set-timezone Asia/Tokyo
-
-# 日本語入力設定
-ibus-setup
-# 設定画面で「Input Method」タブ > 「Add」> 「Japanese」> 「Mozc」を追加
 ```
 
-**設定のポイント**:
-- **OS UI**: 英語のまま（開発者に馴染みやすい）
-- **ブラウザ**: 日本語化（AWS コンソール等が使いやすい）
-- **Kiro IDE**: 日本語エクステンションで対応
-- **日本語入力**: 可能（ドキュメント作成等で必要）
+**Step 3: Node.js インストール**
 
 ```bash
 # Node.js LTS版インストール
@@ -244,224 +270,47 @@ node --version
 npm --version
 ```
 
-##### Step 3: Node.js インストール（Kiro用）
+**Step 4: Kiro IDE インストール**
 
 ```bash
-# Node.js LTS版インストール
-curl -fsSL https://deb.nodesource.com/setup_lts.x | sudo -E bash -
-sudo apt install -y nodejs
+# ダウンロードディレクトリに移動
+cd ~/ダウンロード || cd ~/Downloads || cd ~
 
-# バージョン確認
-node --version
-npm --version
+# .deb パッケージをインストール
+sudo dpkg -i kiro*.deb
+sudo apt-get install -f -y  # 依存関係の修正
 ```
 
-##### Step 4: Kiro IDE インストール + 日本語化
-
-```bash
-# Kiro公式サイトからLinux版をダウンロード
-# 例: .deb パッケージの場合
-wget https://releases.kiro.dev/kiro-latest.deb
-sudo dpkg -i kiro-latest.deb
-sudo apt-get install -f  # 依存関係の修正
-
-# または .AppImage の場合
-wget https://releases.kiro.dev/kiro-latest.AppImage
-chmod +x kiro-latest.AppImage
-sudo mv kiro-latest.AppImage /usr/local/bin/kiro
-
-# Kiro日本語化設定
-mkdir -p ~/.kiro/settings
-cat > ~/.kiro/settings/settings.json << 'EOF'
-{
-  "locale": "ja",
-  "editor.fontSize": 14,
-  "editor.fontFamily": "'Noto Sans CJK JP', monospace",
-  "workbench.colorTheme": "Default Dark+",
-  "extensions.autoUpdate": true
-}
-EOF
-```
-
-**Kiro日本語エクステンション**:
-1. Kiro起動後、Extensions パネルを開く
-2. 「Japanese Language Pack」を検索・インストール
-3. 再起動後、UIが日本語表示される
-
-##### Step 5: サンプルプロジェクト配置
+**Step 5: サンプルプロジェクト作成**
 
 ```bash
 # 全ユーザー用のサンプルディレクトリ作成
 sudo mkdir -p /opt/kiro-samples
-sudo chown -R $USER:$USER /opt/kiro-samples
+sudo chown $(whoami) /opt/kiro-samples
 
 # デスクトップにシンボリックリンク作成
 mkdir -p ~/Desktop
-ln -s /opt/kiro-samples ~/Desktop/Kiro-Samples
+ln -sf /opt/kiro-samples ~/Desktop/Kiro-Samples
 
-# サンプルプロジェクト作成
-cd /opt/kiro-samples
-
-# AWS CDKサンプル
-mkdir aws-cdk-sample
-cd aws-cdk-sample
-cat > README.md << 'EOF'
-# AWS CDK Sample Project
-
-This is a sample AWS CDK project for the Kiro seminar.
-
-## Getting Started
-
-1. Install dependencies:
-   ```bash
-   npm install
-   ```
-
-2. Deploy the stack:
-   ```bash
-   cdk deploy
-   ```
-EOF
-
-cat > package.json << 'EOF'
-{
-  "name": "aws-cdk-sample",
-  "version": "1.0.0",
-  "description": "Sample AWS CDK project for Kiro seminar",
-  "main": "index.js",
-  "scripts": {
-    "build": "tsc",
-    "watch": "tsc -w",
-    "test": "jest",
-    "cdk": "cdk"
-  },
-  "devDependencies": {
-    "@types/node": "^18.0.0",
-    "typescript": "^4.9.0",
-    "aws-cdk": "^2.0.0"
-  },
-  "dependencies": {
-    "aws-cdk-lib": "^2.0.0",
-    "constructs": "^10.0.0"
-  }
-}
-EOF
-
-cd ..
-
-# Node.js サンプル
-mkdir nodejs-sample
-cd nodejs-sample
-cat > app.js << 'EOF'
-const express = require('express');
-const app = express();
-const port = 3000;
-
-app.get('/', (req, res) => {
-  res.send('Hello from Kiro Seminar!');
-});
-
-app.listen(port, () => {
-  console.log(`Server running at http://localhost:${port}`);
-});
-EOF
-
-cat > package.json << 'EOF'
-{
-  "name": "nodejs-sample",
-  "version": "1.0.0",
-  "description": "Sample Node.js project for Kiro seminar",
-  "main": "app.js",
-  "scripts": {
-    "start": "node app.js",
-    "dev": "nodemon app.js"
-  },
-  "dependencies": {
-    "express": "^4.18.0"
-  },
-  "devDependencies": {
-    "nodemon": "^2.0.0"
-  }
-}
-EOF
-
-cd ..
+# サンプルプロジェクト作成（詳細は自動スクリプトを参照）
 ```
 
-##### Step 6: MCP設定（オプション）
+##### セットアップ完了確認
 
 ```bash
-# Kiro設定ディレクトリ作成
-mkdir -p ~/.kiro/settings
-
-# MCP設定ファイル作成
-cat > ~/.kiro/settings/mcp.json << 'EOF'
-{
-  "mcpServers": {
-    "aws-docs": {
-      "command": "uvx",
-      "args": ["awslabs.aws-documentation-mcp-server@latest"],
-      "env": {
-        "FASTMCP_LOG_LEVEL": "ERROR"
-      },
-      "disabled": false,
-      "autoApprove": []
-    }
-  }
-}
-EOF
-```
-
-##### Step 7: デスクトップ環境設定
-
-```bash
-# デスクトップにKiroランチャー作成
-cat > ~/Desktop/Kiro.desktop << 'EOF'
-[Desktop Entry]
-Version=1.0
-Type=Application
-Name=Kiro IDE
-Comment=Kiro Development Environment
-Exec=/usr/local/bin/kiro
-Icon=kiro
-Terminal=false
-Categories=Development;IDE;
-EOF
-
-chmod +x ~/Desktop/Kiro.desktop
-
-# クイックスタートガイド作成
-cat > ~/Desktop/README.txt << 'EOF'
-Kiro Ubuntu セミナー環境へようこそ！
-
-1. デスクトップのKiroアイコンをダブルクリックして起動
-2. Kiro-Samplesフォルダにサンプルプロジェクトがあります
-3. 質問があれば講師にお声がけください
-
-Ubuntu環境の特徴:
-- RDS SAL不要でコスト削減
-- Performance Bundle: 2 vCPU, 8GB RAM
-- ブラウザアクセス対応
-
-楽しいセミナーをお過ごしください！
-EOF
-```
-
-##### Step 8: 動作確認
-
-```bash
-# Kiroが正常に起動するか確認
+# インストール確認
+echo "=== インストール確認 ==="
+node --version
+npm --version
 kiro --version
 
-# サンプルプロジェクトが開けるか確認
-ls -la ~/Desktop/Kiro-Samples/
+# 作成されたファイル確認
+echo "=== 作成されたファイル ==="
+ls -la ~/Desktop/
+ls -la /opt/kiro-samples/
 
-# Node.jsサンプルの動作確認
-cd ~/Desktop/Kiro-Samples/nodejs-sample/
-npm install
-npm start &
-curl http://localhost:3000
-pkill node
+# Kiro IDE 起動テスト
+kiro --version
 ```
 
 #### 3-6. Ubuntu カスタムイメージ作成
@@ -700,12 +549,17 @@ aws workspaces reboot-workspaces --reboot-workspace-requests WorkspaceId=<WORKSP
 
 ## セミナー後の削除
 
+### 🚨 重要: リソース削除について
+
+**セミナー終了後は必ずリソースを削除してください。削除しないと継続的にコストが発生します。**
+
 ### パターンA: Ubuntu WorkSpacesのみ削除（連続セミナーの場合）
 
 次回セミナーでインフラを再利用する場合、WorkSpacesのみ削除します。
 
 ```bash
 # 参加者用Ubuntu WorkSpacesのみ削除（推奨）
+cd aws-seminar
 ./scripts/cleanup-workspaces-only.sh
 
 # 確認なしで実行
@@ -714,16 +568,29 @@ aws workspaces reboot-workspaces --reboot-workspace-requests WorkspaceId=<WORKSP
 
 **所要時間**: 約5-10分
 
+**削除されるもの**:
+- 全てのWorkSpaces（ゴールデンWorkSpace含む）
+- WorkSpacesカスタムイメージ
+- WorkSpacesカスタムBundle
+
+**残るもの（次回再利用可能）**:
+- VPC・サブネット・セキュリティグループ
+- AWS Managed Microsoft AD
+- IP Access Control Group
+- WorkSpaces Directory登録
+
 **次回セミナー時**:
 
 ```bash
 # 同じUbuntuカスタムBundleから再作成
+./scripts/create-golden-workspace.sh
+# ゴールデンWorkSpace内でKiroセットアップ実行
+./scripts/create-custom-bundle.sh
 ./scripts/create-user-workspaces.sh --user-count 20
 ```
 
 **メリット**:
 - Directory再作成（30-45分）が不要
-- Ubuntuゴールデンイメージ・カスタムイメージを再利用
 - ユーザーアカウントも再利用可能
 - 前回のデータは完全にクリア
 
@@ -736,10 +603,59 @@ aws workspaces reboot-workspaces --reboot-workspace-requests WorkspaceId=<WORKSP
 すべてのセミナーが終了した場合、全リソースを削除します。
 
 ```bash
+# 全リソース削除
+cd aws-seminar
 ./scripts/cleanup.sh
+
+# 確認なしで実行（注意：全て削除されます）
+./scripts/cleanup.sh --force
 ```
 
 **所要時間**: 約30-45分（Directory削除に時間がかかる）
+
+**削除されるもの**:
+- 全てのWorkSpaces
+- WorkSpacesカスタムイメージ・Bundle
+- AWS Managed Microsoft AD
+- VPC・サブネット・セキュリティグループ
+- IP Access Control Group
+- WorkSpaces Directory登録
+- 全てのCloudFormationスタック
+
+**⚠️ 注意**: 一度削除すると復元できません。
+
+### 削除確認
+
+```bash
+# 削除完了確認
+aws cloudformation describe-stacks --region ap-northeast-1 --query "Stacks[?contains(StackName, 'aws-seminar')].{Name:StackName,Status:StackStatus}"
+
+# WorkSpaces確認
+aws workspaces describe-workspaces --region ap-northeast-1 --query "Workspaces[].{User:UserName,State:State}"
+
+# 課金確認（翌日以降）
+# AWS Billing & Cost Management コンソールで確認
+```
+
+### 緊急時の手動削除
+
+スクリプトが失敗した場合の手動削除手順：
+
+```bash
+# 1. WorkSpaces削除
+aws workspaces terminate-workspaces --terminate-workspace-requests $(aws workspaces describe-workspaces --region ap-northeast-1 --query "Workspaces[].WorkspaceId" --output text | tr '\n' ' ' | sed 's/ /,WorkspaceId=/g' | sed 's/^/WorkspaceId=/')
+
+# 2. WorkSpacesカスタムイメージ削除
+aws workspaces delete-workspace-image --image-id <IMAGE_ID> --region ap-northeast-1
+
+# 3. CloudFormationスタック削除
+aws cloudformation delete-stack --stack-name aws-seminar-directory --region ap-northeast-1
+aws cloudformation delete-stack --stack-name aws-seminar-network --region ap-northeast-1
+
+# 4. 削除完了まで待機
+aws cloudformation wait stack-delete-complete --stack-name aws-seminar-directory --region ap-northeast-1
+aws cloudformation wait stack-delete-complete --stack-name aws-seminar-network --region ap-northeast-1
+```
 
 ## コスト管理
 
