@@ -99,10 +99,41 @@ setup_japanese_support() {
     # タイムゾーン設定
     sudo timedatectl set-timezone Asia/Tokyo || error_exit "タイムゾーン設定に失敗しました"
     
+    # 日本語キーボードレイアウト設定
+    log_info "日本語キーボードレイアウトを設定中..."
+    
+    # X11 キーボード設定
+    sudo tee /etc/default/keyboard > /dev/null << 'EOF'
+# KEYBOARD CONFIGURATION FILE
+# Consult the keyboard(5) manual page.
+XKBMODEL="pc105"
+XKBLAYOUT="jp"
+XKBVARIANT=""
+XKBOPTIONS=""
+BACKSPACE="guess"
+EOF
+    
+    # 現在のセッションにも適用
+    setxkbmap jp 2>/dev/null || log_warning "現在のセッションへのキーボード設定適用に失敗（再ログイン後に有効になります）"
+    
+    # GNOME 設定（デスクトップ環境用）
+    gsettings set org.gnome.desktop.input-sources sources "[('xkb', 'jp')]" 2>/dev/null || log_warning "GNOME キーボード設定に失敗（手動設定が必要な場合があります）"
+    
+    # 新規ユーザー用のデフォルト設定
+    sudo mkdir -p /etc/skel/.config/dconf
+    sudo tee -a /etc/skel/.config/dconf/user.txt > /dev/null << 'EOF'
+
+# キーボード設定
+[org/gnome/desktop/input-sources]
+sources=[('xkb', 'jp'), ('ibus', 'mozc-jp')]
+EOF
+    
     log_success "日本語対応設定完了"
+    log_info "日本語キーボード: 設定済み（再ログイン後に有効）"
     log_info "日本語入力を有効にするには、ログイン後に以下を実行してください："
     log_info "  1. 画面右上の設定アイコン → Settings"
     log_info "  2. Region & Language → Input Sources → + → Japanese (Mozc)"
+    log_info "  または Super+Space キーで入力切り替え"
 }
 
 # Step 3: Node.js インストール
@@ -633,11 +664,11 @@ EOF
     log_success "新規ユーザー用テンプレート設定完了"
 }
 
-# Step 7: Dock お気に入り設定
+# Step 7: Dock お気に入り設定（強化版）
 setup_dock_favorites() {
-    log_info "Step 7: Dock お気に入り設定"
+    log_info "Step 7: Dock お気に入り設定（強化版）"
     
-    # Kiro IDE のデスクトップファイルを確認
+    # Kiro IDE のデスクトップファイルを確認・作成
     KIRO_DESKTOP_FILE=""
     
     # 一般的な場所を検索
@@ -648,16 +679,62 @@ setup_dock_favorites() {
         fi
     done
     
+    # Kiroのデスクトップファイルが見つからない場合は作成
     if [ -z "$KIRO_DESKTOP_FILE" ]; then
-        log_warning "Kiro のデスクトップファイルが見つかりません"
-        log_info "手動でお気に入りに追加してください："
-        log_info "  1. 左下のアプリケーションメニューを開く"
-        log_info "  2. Kiro を検索"
-        log_info "  3. Kiro アイコンを右クリック → 'Add to Favorites'"
+        log_warning "Kiro のデスクトップファイルが見つかりません。作成します..."
+        
+        # Kiroの実行ファイルパスを検索
+        KIRO_EXEC_PATH=""
+        for path in "/usr/local/bin/kiro" "/usr/bin/kiro" "/opt/kiro/kiro" "/snap/bin/kiro"; do
+            if [ -f "$path" ]; then
+                KIRO_EXEC_PATH="$path"
+                break
+            fi
+        done
+        
+        if [ -n "$KIRO_EXEC_PATH" ]; then
+            # ユーザー用デスクトップファイルを作成
+            mkdir -p ~/.local/share/applications
+            KIRO_DESKTOP_FILE="$HOME/.local/share/applications/kiro.desktop"
+            
+            cat > "$KIRO_DESKTOP_FILE" << EOF
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Kiro
+Comment=Kiro IDE - AI-powered development environment
+Exec=$KIRO_EXEC_PATH
+Icon=kiro
+Terminal=false
+Categories=Development;IDE;TextEditor;
+StartupWMClass=kiro
+MimeType=text/plain;text/x-chdr;text/x-csrc;text/x-c++hdr;text/x-c++src;text/x-java;text/x-dsrc;text/x-pascal;text/x-perl;text/x-python;application/x-php;application/x-httpd-php3;application/x-httpd-php4;application/x-httpd-php5;application/javascript;application/json;text/css;text/html;text/xml;application/xml;application/xhtml+xml;
+EOF
+            
+            chmod +x "$KIRO_DESKTOP_FILE"
+            log_success "Kiro デスクトップファイルを作成: $KIRO_DESKTOP_FILE"
+            
+            # 新規ユーザー用テンプレートにもコピー
+            sudo mkdir -p /etc/skel/.local/share/applications
+            sudo cp "$KIRO_DESKTOP_FILE" /etc/skel/.local/share/applications/
+            
+        else
+            log_error "Kiro の実行ファイルが見つかりません"
+            return 1
+        fi
     else
         log_success "Kiro デスクトップファイルを確認: $KIRO_DESKTOP_FILE"
-        
-        # GNOME のお気に入りに追加（gsettings を使用）
+    fi
+    
+    # デスクトップファイルのデータベースを更新
+    update-desktop-database ~/.local/share/applications/ 2>/dev/null || true
+    sudo update-desktop-database /usr/share/applications/ 2>/dev/null || true
+    
+    # 複数の方法でお気に入りに追加を試行
+    log_info "Dock お気に入りに追加中（複数の方法で試行）..."
+    
+    # 方法1: gsettings を使用（最も一般的）
+    if command -v gsettings &> /dev/null; then
         # 現在のお気に入りを取得
         CURRENT_FAVORITES=$(gsettings get org.gnome.shell favorite-apps 2>/dev/null || echo "[]")
         
@@ -665,28 +742,31 @@ setup_dock_favorites() {
         if echo "$CURRENT_FAVORITES" | grep -q "kiro.desktop"; then
             log_info "Kiro は既にお気に入りに追加されています"
         else
-            # お気に入りに追加
-            # 基本的なアプリケーションと一緒に設定
-            NEW_FAVORITES="['firefox.desktop', 'org.gnome.Nautilus.desktop', 'org.gnome.Terminal.desktop', 'kiro.desktop']"
+            # お気に入りに追加（基本的なアプリと一緒に）
+            NEW_FAVORITES="['firefox.desktop', 'org.gnome.Nautilus.desktop', 'org.gnome.Terminal.desktop', 'kiro.desktop', 'org.gnome.gedit.desktop', 'org.gnome.Calculator.desktop']"
             
-            gsettings set org.gnome.shell favorite-apps "$NEW_FAVORITES" 2>/dev/null && {
-                log_success "Kiro をお気に入りに追加しました"
-            } || {
-                log_warning "gsettings でのお気に入り追加に失敗しました"
-                log_info "手動でお気に入りに追加してください"
-            }
+            if gsettings set org.gnome.shell favorite-apps "$NEW_FAVORITES" 2>/dev/null; then
+                log_success "gsettings でお気に入りに追加しました"
+            else
+                log_warning "gsettings でのお気に入り追加に失敗"
+            fi
         fi
     fi
     
-    # 新規ユーザー用のデフォルト設定も作成
+    # 方法2: dconf を直接使用
+    if command -v dconf &> /dev/null; then
+        log_info "dconf を使用してお気に入り設定を試行中..."
+        dconf write /org/gnome/shell/favorite-apps "['firefox.desktop', 'org.gnome.Nautilus.desktop', 'org.gnome.Terminal.desktop', 'kiro.desktop', 'org.gnome.gedit.desktop', 'org.gnome.Calculator.desktop']" 2>/dev/null || log_warning "dconf 設定に失敗"
+    fi
+    
+    # 方法3: 新規ユーザー用のデフォルト設定を強化
     sudo mkdir -p /etc/skel/.config/dconf
     
-    # dconf 設定をテンプレートに保存（新規ユーザー用）
-    # 注意: この設定は新規ユーザーログイン時に適用される
+    # より詳細な dconf 設定をテンプレートに保存
     sudo tee /etc/skel/.config/dconf/user.txt > /dev/null << 'EOF'
 # GNOME Shell お気に入りアプリケーション設定
 [org/gnome/shell]
-favorite-apps=['firefox.desktop', 'org.gnome.Nautilus.desktop', 'org.gnome.Terminal.desktop', 'kiro.desktop']
+favorite-apps=['firefox.desktop', 'org.gnome.Nautilus.desktop', 'org.gnome.Terminal.desktop', 'kiro.desktop', 'org.gnome.gedit.desktop', 'org.gnome.Calculator.desktop']
 
 # デスクトップ設定
 [org/gnome/desktop/background]
@@ -696,9 +776,137 @@ show-desktop-icons=true
 [org/gnome/nautilus/preferences]
 default-folder-viewer='list-view'
 show-hidden-files=false
+
+# キーボード設定
+[org/gnome/desktop/input-sources]
+sources=[('xkb', 'jp'), ('ibus', 'mozc-jp')]
+
+# Dock設定
+[org/gnome/shell/extensions/dash-to-dock]
+dock-fixed=true
+dock-position='LEFT'
+show-favorites=true
 EOF
     
-    log_success "Dock お気に入り設定完了"
+    # 方法4: ログイン時スクリプトを作成（最も確実）
+    log_info "ログイン時自動設定スクリプトを作成中..."
+    
+    # より堅牢なログイン時スクリプト
+    mkdir -p ~/.config/autostart
+    cat > ~/.config/autostart/kiro-dock-setup.desktop << 'EOF'
+[Desktop Entry]
+Type=Application
+Name=Kiro Dock Setup
+Comment=Add Kiro to dock favorites on login
+Exec=/bin/bash -c 'sleep 10 && for i in {1..5}; do gsettings set org.gnome.shell favorite-apps "[\\"firefox.desktop\\", \\"org.gnome.Nautilus.desktop\\", \\"org.gnome.Terminal.desktop\\", \\"kiro.desktop\\", \\"org.gnome.gedit.desktop\\", \\"org.gnome.Calculator.desktop\\"]" 2>/dev/null && break || sleep 5; done'
+Hidden=false
+NoDisplay=true
+X-GNOME-Autostart-enabled=true
+EOF
+    
+    # 新規ユーザー用テンプレート
+    sudo mkdir -p /etc/skel/.config/autostart
+    sudo cp ~/.config/autostart/kiro-dock-setup.desktop /etc/skel/.config/autostart/
+    
+    # 方法5: systemd ユーザーサービスとして設定（より確実）
+    log_info "systemd ユーザーサービスを作成中..."
+    
+    mkdir -p ~/.config/systemd/user
+    cat > ~/.config/systemd/user/kiro-dock-setup.service << 'EOF'
+[Unit]
+Description=Setup Kiro in GNOME Dock favorites
+After=graphical-session.target
+
+[Service]
+Type=oneshot
+ExecStartPre=/bin/sleep 15
+ExecStart=/bin/bash -c 'DISPLAY=:0 gsettings set org.gnome.shell favorite-apps "[\\"firefox.desktop\\", \\"org.gnome.Nautilus.desktop\\", \\"org.gnome.Terminal.desktop\\", \\"kiro.desktop\\", \\"org.gnome.gedit.desktop\\", \\"org.gnome.Calculator.desktop\\"]"'
+RemainAfterExit=yes
+
+[Install]
+WantedBy=default.target
+EOF
+    
+    # サービスを有効化
+    systemctl --user daemon-reload 2>/dev/null || true
+    systemctl --user enable kiro-dock-setup.service 2>/dev/null || true
+    
+    # 新規ユーザー用テンプレート
+    sudo mkdir -p /etc/skel/.config/systemd/user
+    sudo cp ~/.config/systemd/user/kiro-dock-setup.service /etc/skel/.config/systemd/user/
+    
+    # 方法6: プロファイル設定でログイン時に実行
+    log_info "プロファイル設定を追加中..."
+    
+    # bashrc に追加
+    if ! grep -q "kiro-dock-setup" ~/.bashrc 2>/dev/null; then
+        cat >> ~/.bashrc << 'EOF'
+
+# Kiro Dock setup (run once per session)
+if [ -n "$DISPLAY" ] && [ -z "$KIRO_DOCK_SETUP_DONE" ]; then
+    export KIRO_DOCK_SETUP_DONE=1
+    (sleep 20 && gsettings set org.gnome.shell favorite-apps "['firefox.desktop', 'org.gnome.Nautilus.desktop', 'org.gnome.Terminal.desktop', 'kiro.desktop', 'org.gnome.gedit.desktop', 'org.gnome.Calculator.desktop']" 2>/dev/null) &
+fi
+EOF
+    fi
+    
+    # 新規ユーザー用テンプレート
+    if ! sudo grep -q "kiro-dock-setup" /etc/skel/.bashrc 2>/dev/null; then
+        sudo tee -a /etc/skel/.bashrc > /dev/null << 'EOF'
+
+# Kiro Dock setup (run once per session)
+if [ -n "$DISPLAY" ] && [ -z "$KIRO_DOCK_SETUP_DONE" ]; then
+    export KIRO_DOCK_SETUP_DONE=1
+    (sleep 20 && gsettings set org.gnome.shell favorite-apps "['firefox.desktop', 'org.gnome.Nautilus.desktop', 'org.gnome.Terminal.desktop', 'kiro.desktop', 'org.gnome.gedit.desktop', 'org.gnome.Calculator.desktop']" 2>/dev/null) &
+fi
+EOF
+    fi
+    
+    # 方法7: 即座に現在のセッションで試行
+    log_info "現在のセッションで即座に設定を試行中..."
+    
+    # GNOME Shell の再読み込みを試行
+    if command -v gnome-shell &> /dev/null && [ -n "$DISPLAY" ]; then
+        # Alt+F2 → r → Enter のシミュレーション（危険なので無効化）
+        # gdbus call --session --dest org.gnome.Shell --object-path /org/gnome/Shell --method org.gnome.Shell.Eval 'Main.loadTheme()' 2>/dev/null || true
+        
+        # より安全な方法で設定を適用
+        (sleep 5 && gsettings set org.gnome.shell favorite-apps "['firefox.desktop', 'org.gnome.Nautilus.desktop', 'org.gnome.Terminal.desktop', 'kiro.desktop', 'org.gnome.gedit.desktop', 'org.gnome.Calculator.desktop']" 2>/dev/null) &
+    fi
+    
+    log_success "Dock お気に入り設定完了（複数の方法で設定済み）"
+    log_info ""
+    log_info "=== 設定された方法 ==="
+    log_info "1. gsettings による即座の設定"
+    log_info "2. dconf による直接設定"
+    log_info "3. 新規ユーザー用デフォルト設定"
+    log_info "4. ログイン時自動実行スクリプト"
+    log_info "5. systemd ユーザーサービス"
+    log_info "6. bashrc プロファイル設定"
+    log_info "7. 現在セッションでの即座適用"
+    log_info ""
+    log_info "=== 手動設定方法（参加者向け案内） ==="
+    log_info "自動設定が反映されない場合は、以下の手順で手動追加してください："
+    log_info ""
+    log_info "【方法1: アプリケーションメニューから】"
+    log_info "  1. 左下の「アクティビティ」をクリック"
+    log_info "  2. 「アプリケーションを表示」（9つの点のアイコン）をクリック"
+    log_info "  3. 「Kiro」を見つけて右クリック"
+    log_info "  4. 「お気に入りに追加」を選択"
+    log_info ""
+    log_info "【方法2: 検索から】"
+    log_info "  1. Super キー（Windows キー）を押す"
+    log_info "  2. 「kiro」と入力"
+    log_info "  3. Kiro アイコンを右クリック"
+    log_info "  4. 「お気に入りに追加」を選択"
+    log_info ""
+    log_info "【方法3: コマンドから】"
+    log_info "  ターミナルで以下を実行："
+    log_info "  gsettings set org.gnome.shell favorite-apps \"['firefox.desktop', 'org.gnome.Nautilus.desktop', 'org.gnome.Terminal.desktop', 'kiro.desktop']\""
+    log_info ""
+    log_info "【方法4: 再ログイン】"
+    log_info "  上記で解決しない場合は、一度ログアウトして再ログインしてください"
+    log_info ""
 }
 
 # Step 8: 最終確認と動作テスト

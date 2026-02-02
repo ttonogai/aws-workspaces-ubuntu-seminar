@@ -8,7 +8,30 @@ Kiroハンズオン用のUbuntu AWS WorkSpaces環境を構築するためのス�
 - **Performance Bundle**: 2 vCPU, 8GB RAM（Kiro IDE動作要件を満たす）
 - **完全自動化**: CloudFormation + AWS CLIによる自動構築
 - **動的Bundle検出**: リージョン別Bundle IDの自動検出
+- **API Rate Limiting対応**: 自動リトライ機能でThrottlingException回避
+- **強化されたDock設定**: 7つの方法でKiroお気に入り設定を自動化
 - **ブラウザアクセス対応**: WorkSpacesクライアント不要
+
+## 🔄 最新の改善点（v1.2）
+
+### API Rate Limiting対応
+- **自動リトライ機能**: AWS API呼び出し時のThrottlingExceptionを自動的に処理
+- **指数バックオフ**: 10秒 → 20秒 → 40秒の待機時間で最大3回リトライ
+- **対象スクリプト**: `create-golden-workspace.sh`, `create-custom-bundle.sh`, `create-user-workspaces.sh`
+
+### Dock お気に入り設定の強化
+- **7つの設定方法**: 複数のアプローチでKiroのDockお気に入り設定を確実に実行
+  1. gsettings による即座の設定
+  2. dconf による直接設定
+  3. 新規ユーザー用デフォルト設定
+  4. ログイン時自動実行スクリプト
+  5. systemd ユーザーサービス
+  6. bashrc プロファイル設定
+  7. 現在セッションでの即座適用
+
+### テスト用スクリプト追加
+- `test-api-rate-limiting.sh`: API Rate Limiting対応の動作確認
+- `test-dock-setup.sh`: Dock設定の動作確認とトラブルシューティング
 
 ## 💰 コスト比較
 
@@ -79,6 +102,12 @@ aws-seminar/
 ### 管理・削除
 - `cleanup.sh` - 全リソース削除
 - `cleanup-workspaces-only.sh` - WorkSpacesのみ削除
+- `cleanup-user-workspaces-only.sh` - ユーザーWorkSpacesのみ削除（ゴールデン保持）
+
+### テスト・検証
+- `test-api-rate-limiting.sh` - API Rate Limiting対応の動作確認
+- `test-dock-setup.sh` - Dock設定の動作確認
+- `validate-bundles.sh` - Bundle ID検証
 
 ## 🎯 セットアップ手順
 
@@ -148,6 +177,23 @@ chmod +x setup-golden-workspace.sh
 ### WorkSpacesのみ削除（インフラ保持）
 ```bash
 ./scripts/cleanup-workspaces-only.sh
+```
+
+### ユーザーWorkSpacesのみ削除（ゴールデン保持・連続セミナー用）
+```bash
+./scripts/cleanup-user-workspaces-only.sh
+```
+
+## 🧪 テスト・検証
+
+### API Rate Limiting テスト
+```bash
+./scripts/test-api-rate-limiting.sh
+```
+
+### Dock設定テスト（Ubuntu WorkSpace内で実行）
+```bash
+./scripts/test-dock-setup.sh
 ```
 
 ## 📄 ライセンス

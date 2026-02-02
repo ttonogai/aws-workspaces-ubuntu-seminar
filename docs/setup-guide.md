@@ -205,8 +205,11 @@ aws workspaces describe-workspaces --directory-id <DIRECTORY_ID> --region ap-nor
 git clone https://github.com/ttonogai/aws-workspaces-ubuntu-seminar.git
 cd aws-workspaces-ubuntu-seminar
 
+# スクリプトに実行権限を付与
+chmod +x scripts/setup-golden-workspace.sh
+
 # セットアップスクリプトを実行
-./aws-seminar/scripts/setup-golden-workspace.sh
+./scripts/setup-golden-workspace.sh
 ```
 
 **スクリプトの実行内容**:
@@ -496,7 +499,77 @@ aws workspaces describe-workspaces --directory-id <DIRECTORY_ID> --region ap-nor
 #### 5-3. 予備WorkSpace準備
 トラブル時の予備として、2-3台の追加WorkSpaceを作成しておくことを推奨します。
 
-## トラブルシューティング
+### トラブルシューティング
+
+### API Rate Limiting 対応
+
+#### 問題: "ThrottlingException" または "Rate exceeded" エラー
+**症状**: AWS API呼び出し時に以下のようなエラーが発生
+```
+An error occurred (ThrottlingException) when calling the DescribeWorkspaceBundles operation (reached max retries: 2): Rate exceeded
+```
+
+**原因**: 短時間での連続API呼び出しによるAWS APIレート制限
+
+**解決方法**: 
+- スクリプトには自動リトライ機能が組み込まれています
+- 指数バックオフ（10秒 → 20秒 → 40秒）で自動的に再試行
+- 最大3回まで自動リトライ
+
+**手動対処法**:
+```bash
+# 少し時間を置いてから再実行
+sleep 30
+./scripts/create-golden-workspace.sh
+
+# または個別にBundle情報を確認
+aws workspaces describe-workspace-bundles --region ap-northeast-1 --output table
+```
+
+### Dock お気に入り設定の問題
+
+#### 問題: Kiro がお気に入りに表示されない
+**症状**: ユーザーWorkSpace展開時にKiroがDockのお気に入りに入っていない
+
+**原因**: Ubuntu 22.04 GNOME環境でのDock設定の複雑性
+
+**自動対応済み**:
+`setup-golden-workspace.sh` スクリプトで以下の7つの方法で自動設定：
+1. gsettings による即座の設定
+2. dconf による直接設定  
+3. 新規ユーザー用デフォルト設定
+4. ログイン時自動実行スクリプト
+5. systemd ユーザーサービス
+6. bashrc プロファイル設定
+7. 現在セッションでの即座適用
+
+**参加者向け手動設定方法**:
+
+##### 【方法1: アプリケーションメニューから（推奨）】
+1. 左下の「アクティビティ」をクリック
+2. 「アプリケーションを表示」（9つの点のアイコン）をクリック
+3. 「Kiro」を見つけて右クリック
+4. 「お気に入りに追加」を選択
+
+##### 【方法2: 検索から】
+1. Super キー（Windows キー）を押す
+2. 「kiro」と入力
+3. Kiro アイコンを右クリック
+4. 「お気に入りに追加」を選択
+
+##### 【方法3: コマンドから】
+```bash
+gsettings set org.gnome.shell favorite-apps "['firefox.desktop', 'org.gnome.Nautilus.desktop', 'org.gnome.Terminal.desktop', 'kiro.desktop']"
+```
+
+##### 【方法4: 再ログイン】
+上記で解決しない場合は、一度ログアウトして再ログインしてください。
+
+#### 問題: 設定が反映されない
+**解決方法**:
+1. **GNOME Shell の再起動**: Alt+F2 → 「r」と入力 → Enter
+2. **完全な再ログイン**: ログアウト → 再ログイン
+3. **WorkSpace の再起動**: AWS管理コンソールからWorkSpaceを再起動
 
 ### WorkSpaces Directory登録ができない
 
@@ -553,10 +626,17 @@ aws workspaces reboot-workspaces --reboot-workspace-requests WorkspaceId=<WORKSP
 
 **セミナー終了後は必ずリソースを削除してください。削除しないと継続的にコストが発生します。**
 
+**⚠️ 重要な課金ポイント**:
+- **WorkSpacesは停止していても月額料金が発生します**
+- Ubuntu Performance Bundle: $25/月/台（停止中でも課金）
+- 20台の場合: $500/月（停止中でも課金継続）
+- **完全に課金を止めるには削除（TERMINATED）が必要**
+
 ### パターンA: Ubuntu WorkSpacesのみ削除（連続セミナーの場合）
 
 次回セミナーでインフラを再利用する場合、WorkSpacesのみ削除します。
 
+#### **オプション1: 全WorkSpaces削除（従来方式）**
 ```bash
 # 参加者用Ubuntu WorkSpacesのみ削除（推奨）
 cd aws-seminar
@@ -566,21 +646,12 @@ cd aws-seminar
 ./scripts/cleanup-workspaces-only.sh --force
 ```
 
-**所要時間**: 約5-10分
-
 **削除されるもの**:
 - 全てのWorkSpaces（ゴールデンWorkSpace含む）
 - WorkSpacesカスタムイメージ
 - WorkSpacesカスタムBundle
 
-**残るもの（次回再利用可能）**:
-- VPC・サブネット・セキュリティグループ
-- AWS Managed Microsoft AD
-- IP Access Control Group
-- WorkSpaces Directory登録
-
 **次回セミナー時**:
-
 ```bash
 # 同じUbuntuカスタムBundleから再作成
 ./scripts/create-golden-workspace.sh
@@ -589,14 +660,35 @@ cd aws-seminar
 ./scripts/create-user-workspaces.sh --user-count 20
 ```
 
-**メリット**:
-- Directory再作成（30-45分）が不要
-- ユーザーアカウントも再利用可能
-- 前回のデータは完全にクリア
+#### **オプション2: ゴールデンWorkSpace保持（コスト最適化版）**
 
-**コスト（WorkSpaces削除後）**:
-- 1日あたり約$3.1（約470円）
-- 1週間で約$22（約3,300円）
+**💡 推奨**: 連続セミナーの場合、ゴールデンWorkSpaceを停止保持することで運用効率を大幅向上できます。
+
+**1日目終了後**:
+```bash
+# ユーザーWorkSpacesのみ削除（ゴールデンWorkSpace保持）
+./scripts/cleanup-user-workspaces-only.sh
+
+# 確認なしで実行
+./scripts/cleanup-user-workspaces-only.sh --force
+```
+
+**2日目開始前**:
+```bash
+# カスタムイメージ・Bundleが保持されているため、
+# ゴールデンWorkSpaceの起動は不要！
+
+# 既存のカスタムイメージ・Bundleから直接ユーザーWorkSpaces作成
+./scripts/create-user-workspaces.sh --user-count 20
+```
+
+**💡 ポイント**: カスタムイメージ・カスタムBundleは保持されているため、ゴールデンWorkSpaceを起動する必要はありません。
+
+**メリット**:
+- **コスト**: 同じ（日割り課金のため）
+- **時短**: 約2時間の準備時間短縮
+- **リスク軽減**: セットアップ手順省略でヒューマンエラー削減
+- **環境一貫性**: 1日目と同じ環境を確実に再現
 
 ### パターンB: 全リソース削除（セミナー終了後）
 
@@ -613,6 +705,15 @@ cd aws-seminar
 
 **所要時間**: 約30-45分（Directory削除に時間がかかる）
 
+**削除順序**（依存関係を考慮した順序で削除）:
+1. Ubuntu WorkSpaces削除
+2. カスタムBundle削除  
+3. IP Access Control Group削除（Directory削除前に関連付け解除）
+4. WorkSpaces Directory登録解除
+5. カスタムイメージ削除
+6. CloudFormationスタック削除（Directory → Network の順）
+7. 孤立リソース確認・削除
+
 **削除されるもの**:
 - 全てのWorkSpaces
 - WorkSpacesカスタムイメージ・Bundle
@@ -623,6 +724,11 @@ cd aws-seminar
 - 全てのCloudFormationスタック
 
 **⚠️ 注意**: 一度削除すると復元できません。
+
+**改善点**:
+- IP Access Control Group削除時の依存関係エラーを修正
+- Directory削除前にIP Groupの関連付けを適切に解除
+- Network Stack削除の成功率を向上
 
 ### 削除確認
 
@@ -648,14 +754,64 @@ aws workspaces terminate-workspaces --terminate-workspace-requests $(aws workspa
 # 2. WorkSpacesカスタムイメージ削除
 aws workspaces delete-workspace-image --image-id <IMAGE_ID> --region ap-northeast-1
 
-# 3. CloudFormationスタック削除
+# 3. IP Access Control Group削除（Directory削除前に実行）
+# まず関連付けを解除
+aws workspaces disassociate-ip-groups --directory-id <DIRECTORY_ID> --group-ids <GROUP_ID> --region ap-northeast-1
+# 次にIP Groupを削除
+aws workspaces delete-ip-group --group-id <GROUP_ID> --region ap-northeast-1
+
+# 4. CloudFormationスタック削除（順序重要）
 aws cloudformation delete-stack --stack-name aws-seminar-directory --region ap-northeast-1
+# Directory削除開始を待機（30秒程度）
+sleep 30
 aws cloudformation delete-stack --stack-name aws-seminar-network --region ap-northeast-1
 
-# 4. 削除完了まで待機
+# 5. 削除完了まで待機
 aws cloudformation wait stack-delete-complete --stack-name aws-seminar-directory --region ap-northeast-1
 aws cloudformation wait stack-delete-complete --stack-name aws-seminar-network --region ap-northeast-1
 ```
+
+### クリーンアップのトラブルシューティング
+
+#### 問題: IP Access Control Group削除エラー
+**症状**: `削除失敗` と表示される
+**原因**: Directory削除後にIP Groupが孤立状態になる
+**解決方法**:
+```bash
+# Directory削除前にIP Group関連付けを解除
+aws workspaces disassociate-ip-groups --directory-id <DIRECTORY_ID> --group-ids <GROUP_ID> --region ap-northeast-1
+
+# その後IP Groupを削除
+aws workspaces delete-ip-group --group-id <GROUP_ID> --region ap-northeast-1
+```
+
+#### 問題: Network Stack削除が開始されない
+**症状**: 管理コンソールでNetwork Stackの削除が開始されない
+**原因**: IP Access Control Groupの依存関係が残っている
+**解決方法**:
+1. **IP Access Control Groupを手動削除**
+2. **Directory Stack削除の完了を待機**
+3. **Network Stack削除を再実行**
+
+```bash
+# Network Stack削除状況確認
+aws cloudformation describe-stacks --stack-name aws-seminar-network --region ap-northeast-1 --query "Stacks[0].StackStatus"
+
+# 削除が進行していない場合は再実行
+aws cloudformation delete-stack --stack-name aws-seminar-network --region ap-northeast-1
+```
+
+#### 問題: Directory削除に時間がかかりすぎる
+**症状**: 30分以上経過してもDirectory削除が完了しない
+**確認方法**:
+```bash
+# Directory削除状況確認
+aws cloudformation describe-stack-events --stack-name aws-seminar-directory --region ap-northeast-1 --query "StackEvents[0:5].{Time:Timestamp,Status:ResourceStatus,Reason:ResourceStatusReason}"
+```
+
+**対処法**:
+- 通常は45分程度で完了
+- 1時間以上かかる場合はAWSサポートに問い合わせ
 
 ## コスト管理
 

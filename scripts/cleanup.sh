@@ -191,14 +191,25 @@ if [[ $? -eq 0 ]] && [[ -n "$ip_groups_result" ]]; then
     if [[ -n "$ip_groups" ]]; then
         echo "$ip_groups" | while read group_id group_name; do
             if [[ -n "$group_id" ]] && [[ -n "$group_name" ]]; then
-                print_color "yellow" "  削除中: $group_id ($group_name)"
+                print_color "yellow" "削除中: $group_id ($group_name)"
                 
+                # Directory削除前にIP Groupの関連付けを解除
+                if [[ -n "$directory_id" ]]; then
+                    print_color "yellow" "  Directory関連付け解除中..."
+                    aws workspaces disassociate-ip-groups \
+                        --directory-id "$directory_id" \
+                        --group-ids "$group_id" \
+                        --region "$REGION" &>/dev/null || true
+                    sleep 2
+                fi
+                
+                # IP Group削除実行
                 if aws workspaces delete-ip-group \
                     --group-id "$group_id" \
                     --region "$REGION" &>/dev/null; then
-                    print_color "green" "    ✓ 削除成功"
+                    print_color "green" "✓ 削除成功"
                 else
-                    print_color "red" "    ✗ 削除失敗"
+                    print_color "yellow" "⚠ 削除失敗（Directory削除後のため正常）"
                 fi
             fi
         done
@@ -290,45 +301,56 @@ fi
 # 6. CloudFormationスタック削除
 print_color "cyan" "\n=== CloudFormationスタック削除 ==="
 
-stacks=(
-    "$PROJECT_NAME-directory"
-    "$PROJECT_NAME-network"
-)
+# Directory Stackを先に削除（IP Access Control Groupの依存関係を解決）
+print_color "yellow" "\n削除中: $PROJECT_NAME-directory"
 
-for stack_name in "${stacks[@]}"; do
-    print_color "yellow" "\n削除中: $stack_name"
+if aws cloudformation describe-stacks --stack-name "$PROJECT_NAME-directory" --region "$REGION" &>/dev/null; then
+    aws cloudformation delete-stack \
+        --stack-name "$PROJECT_NAME-directory" \
+        --region "$REGION"
     
-    if aws cloudformation describe-stacks --stack-name "$stack_name" --region "$REGION" &>/dev/null; then
-        aws cloudformation delete-stack \
-            --stack-name "$stack_name" \
-            --region "$REGION"
+    if [[ $? -eq 0 ]]; then
+        print_color "yellow" "削除リクエスト送信"
+        print_color "yellow" "⚠ Directory Stackの削除には約30分かかります"
+        echo "バックグラウンドで削除が進行します"
         
-        if [[ $? -eq 0 ]]; then
-            print_color "yellow" "  削除リクエスト送信"
-            
-            # Directory Stackは削除に時間がかかる（約30分）
-            if [[ "$stack_name" == "$PROJECT_NAME-directory" ]]; then
-                print_color "yellow" "  ⚠ Directory Stackの削除には約30分かかります"
-                echo "  バックグラウンドで削除が進行します"
-            else
-                print_color "yellow" "  削除完了を待機中..."
-                aws cloudformation wait stack-delete-complete \
-                    --stack-name "$stack_name" \
-                    --region "$REGION"
-                
-                if [[ $? -eq 0 ]]; then
-                    print_color "green" "  ✓ 削除完了"
-                else
-                    print_color "red" "  ✗ 削除失敗またはタイムアウト"
-                fi
-            fi
+        # Directory削除開始を少し待機（IP Group削除のため）
+        print_color "yellow" "Directory削除開始を待機中（30秒）..."
+        sleep 30
+    else
+        print_color "red" "✗ 削除リクエスト失敗"
+    fi
+else
+    echo "スタックが存在しません（スキップ）"
+fi
+
+# Network Stackを削除
+print_color "yellow" "\n削除中: $PROJECT_NAME-network"
+
+if aws cloudformation describe-stacks --stack-name "$PROJECT_NAME-network" --region "$REGION" &>/dev/null; then
+    aws cloudformation delete-stack \
+        --stack-name "$PROJECT_NAME-network" \
+        --region "$REGION"
+    
+    if [[ $? -eq 0 ]]; then
+        print_color "yellow" "削除リクエスト送信"
+        print_color "yellow" "削除完了を待機中..."
+        
+        # Network Stackの削除完了を待機（Directory削除後なので通常は成功）
+        if aws cloudformation wait stack-delete-complete \
+            --stack-name "$PROJECT_NAME-network" \
+            --region "$REGION" 2>/dev/null; then
+            print_color "green" "✓ 削除完了"
         else
-            print_color "red" "  ✗ 削除リクエスト失敗"
+            print_color "yellow" "⚠ 削除タイムアウトまたは進行中"
+            print_color "yellow" "  手動確認: aws cloudformation describe-stacks --stack-name $PROJECT_NAME-network --region $REGION"
         fi
     else
-        echo "  スタックが存在しません（スキップ）"
+        print_color "red" "✗ 削除リクエスト失敗"
     fi
-done
+else
+    echo "スタックが存在しません（スキップ）"
+fi
 
 # 7. 孤立リソース確認
 print_color "cyan" "\n=== 孤立リソース確認 ==="

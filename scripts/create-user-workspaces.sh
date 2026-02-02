@@ -72,15 +72,47 @@ if [[ -z "$directory_id" ]]; then
 fi
 print_color "green" "✓ Directory ID: $directory_id"
 
+# レート制限対策: リトライ機能付きでBundle情報を取得
+get_bundles_with_retry() {
+    local max_attempts=3
+    local wait_time=10
+    local attempt=1
+    
+    while [[ $attempt -le $max_attempts ]]; do
+        print_color "yellow" "Bundle情報取得中... (試行 $attempt/$max_attempts)"
+        
+        # カスタムBundle（kiro-ubuntu-seminar-bundle）を検索
+        bundle_result=$(aws workspaces describe-workspace-bundles \
+            --region "$REGION" \
+            --query "Bundles[?contains(Name, 'kiro-ubuntu-seminar-bundle')].BundleId" \
+            --output text 2>/dev/null)
+        
+        local exit_code=$?
+        
+        if [[ $exit_code -eq 0 ]]; then
+            echo "$bundle_result"
+            return 0
+        elif [[ $exit_code -eq 254 ]] || grep -q "ThrottlingException\|Rate exceeded" <<< "$bundle_result" 2>/dev/null; then
+            print_color "yellow" "⚠ レート制限に達しました。${wait_time}秒待機中..."
+            sleep $wait_time
+            wait_time=$((wait_time * 2))  # 指数バックオフ
+            attempt=$((attempt + 1))
+        else
+            print_color "red" "✗ Bundle情報の取得に失敗しました (試行 $attempt)"
+            attempt=$((attempt + 1))
+            sleep 5
+        fi
+    done
+    
+    print_color "red" "✗ Bundle情報の取得に失敗しました（最大試行回数に達しました）"
+    return 1
+}
+
 # カスタムBundle ID自動検出（指定されていない場合）
 if [[ -z "$BUNDLE_ID" ]]; then
     print_color "yellow" "\nUbuntuカスタムBundleを検索中..."
     
-    # カスタムBundle（kiro-ubuntu-seminar-bundle）を検索
-    BUNDLE_ID=$(aws workspaces describe-workspace-bundles \
-        --region "$REGION" \
-        --query "Bundles[?contains(Name, 'kiro-ubuntu-seminar-bundle')].BundleId" \
-        --output text 2>/dev/null)
+    BUNDLE_ID=$(get_bundles_with_retry)
     
     if [[ -n "$BUNDLE_ID" ]] && [[ "$BUNDLE_ID" != "None" ]]; then
         print_color "green" "✓ カスタムBundle検出: $BUNDLE_ID"

@@ -61,14 +61,47 @@ print_color() {
 
 print_color "cyan" "\n=== Ubuntu カスタムBundle作成 ==="
 
+# レート制限対策: リトライ機能付きでイメージ情報を取得
+get_images_with_retry() {
+    local max_attempts=3
+    local wait_time=10
+    local attempt=1
+    
+    while [[ $attempt -le $max_attempts ]]; do
+        print_color "yellow" "イメージ情報取得中... (試行 $attempt/$max_attempts)"
+        
+        # Ubuntu関連のカスタムイメージを検索
+        image_result=$(aws workspaces describe-workspace-images \
+            --region "$REGION" \
+            --query "Images[?Owner!='AMAZON' && (contains(Name, 'ubuntu') || contains(Name, 'Ubuntu'))].ImageId" \
+            --output text 2>/dev/null)
+        
+        local exit_code=$?
+        
+        if [[ $exit_code -eq 0 ]]; then
+            echo "$image_result"
+            return 0
+        elif [[ $exit_code -eq 254 ]] || grep -q "ThrottlingException\|Rate exceeded" <<< "$image_result" 2>/dev/null; then
+            print_color "yellow" "⚠ レート制限に達しました。${wait_time}秒待機中..."
+            sleep $wait_time
+            wait_time=$((wait_time * 2))  # 指数バックオフ
+            attempt=$((attempt + 1))
+        else
+            print_color "red" "✗ イメージ情報の取得に失敗しました (試行 $attempt)"
+            attempt=$((attempt + 1))
+            sleep 5
+        fi
+    done
+    
+    print_color "red" "✗ イメージ情報の取得に失敗しました（最大試行回数に達しました）"
+    return 1
+}
+
 # カスタムイメージID自動検出（指定されていない場合）
 if [[ -z "$IMAGE_ID" ]]; then
     print_color "yellow" "\nUbuntuカスタムイメージを検索中..."
-    # Ubuntu関連のカスタムイメージを検索
-    IMAGE_ID=$(aws workspaces describe-workspace-images \
-        --region "$REGION" \
-        --query "Images[?Owner!='AMAZON' && (contains(Name, 'ubuntu') || contains(Name, 'Ubuntu'))].ImageId" \
-        --output text 2>/dev/null | tail -1)
+    
+    IMAGE_ID=$(get_images_with_retry | tail -1)
     
     if [[ -z "$IMAGE_ID" ]]; then
         print_color "red" "✗ Ubuntuカスタムイメージが見つかりません"

@@ -65,59 +65,49 @@ if [[ -z "$directory_id" ]]; then
 fi
 print_color "green" "✓ Directory ID: $directory_id"
 
-# Ubuntu Bundle確認（動的検出）
+# Ubuntu Bundle確認（簡略化版）
 print_color "yellow" "\nUbuntu Performance Bundleを検索中..."
 
-# Ubuntu Performance Bundle を動的検出（ユーザーが発見したコマンドパターンを使用）
-ubuntu_bundles=$(aws workspaces describe-workspace-bundles \
+# 既知のBundle IDを直接使用（最も確実）
+BUNDLE_ID="wsb-9vmkgyywb"  # Performance with Ubuntu 22.04 (Japanese)
+
+# Bundle IDが有効かチェック
+bundle_info=$(aws workspaces describe-workspace-bundles \
+    --bundle-ids "$BUNDLE_ID" \
     --region "$REGION" \
-    --owner AMAZON \
-    --query 'Bundles[?contains(Name, `Ubuntu`) && contains(Name, `Performance`)].{BundleId:BundleId,Name:Name,Description:Description,ComputeType:ComputeType.Name}' \
+    --query "Bundles[0].{Name:Name,ComputeType:ComputeType.Name,State:State}" \
     --output json 2>/dev/null)
 
-if [[ $? -ne 0 ]]; then
-    print_color "red" "✗ Bundle情報の取得に失敗しました"
-    exit 1
-fi
-
-bundle_count=$(echo "$ubuntu_bundles" | jq length)
-
-if [[ $bundle_count -eq 0 ]]; then
-    print_color "red" "✗ Ubuntu Performance Bundle が見つかりません"
+if [[ $? -eq 0 ]] && [[ -n "$bundle_info" ]]; then
+    bundle_name=$(echo "$bundle_info" | jq -r '.Name' 2>/dev/null)
+    compute_type=$(echo "$bundle_info" | jq -r '.ComputeType' 2>/dev/null)
+    bundle_state=$(echo "$bundle_info" | jq -r '.State' 2>/dev/null)
+    
+    if [[ "$bundle_state" == "AVAILABLE" ]]; then
+        print_color "green" "✓ Ubuntu Performance Bundle確認完了"
+        print_color "green" "✓ Bundle ID: $BUNDLE_ID"
+        print_color "green" "✓ Bundle名: $bundle_name"
+        print_color "green" "✓ コンピュートタイプ: $compute_type"
+        print_color "green" "✓ 提供者: AMAZON"
+    else
+        print_color "red" "✗ Bundle状態が利用不可: $bundle_state"
+        exit 1
+    fi
+else
+    print_color "red" "✗ 既知のBundle ID '$BUNDLE_ID' が利用できません"
     print_color "yellow" "利用可能なUbuntu Bundle:"
+    
+    # フォールバック検索
     aws workspaces describe-workspace-bundles \
         --region "$REGION" \
         --owner AMAZON \
         --query 'Bundles[?contains(Name, `Ubuntu`)].{BundleId:BundleId,Name:Name,ComputeType:ComputeType.Name}' \
-        --output table
+        --output table 2>/dev/null || {
+        print_color "yellow" "手動で確認してください："
+        print_color "yellow" "  aws workspaces describe-workspace-bundles --region $REGION --owner AMAZON --output table"
+    }
     exit 1
 fi
-
-# 日本語版を優先して選択
-japanese_bundle=$(echo "$ubuntu_bundles" | jq -r '.[] | select(.Name | contains("Japanese"))')
-
-if [[ -n "$japanese_bundle" ]]; then
-    BUNDLE_ID=$(echo "$japanese_bundle" | jq -r '.BundleId')
-    bundle_name=$(echo "$japanese_bundle" | jq -r '.Name')
-    compute_type=$(echo "$japanese_bundle" | jq -r '.ComputeType')
-    print_color "green" "✓ 日本語版Ubuntu Performance Bundle を検出"
-else
-    # 日本語版がない場合は最初のものを使用
-    BUNDLE_ID=$(echo "$ubuntu_bundles" | jq -r '.[0].BundleId')
-    bundle_name=$(echo "$ubuntu_bundles" | jq -r '.[0].Name')
-    compute_type=$(echo "$ubuntu_bundles" | jq -r '.[0].ComputeType')
-    print_color "green" "✓ Ubuntu Performance Bundle を検出"
-fi
-
-if [[ -z "$BUNDLE_ID" ]] || [[ "$BUNDLE_ID" == "null" ]]; then
-    print_color "red" "✗ 適切なUbuntu Bundle IDが取得できません"
-    exit 1
-fi
-
-print_color "green" "✓ 検出されたBundle ID: $BUNDLE_ID"
-print_color "green" "✓ Bundle名: $bundle_name"
-print_color "green" "✓ コンピュートタイプ: $compute_type"
-print_color "green" "✓ 提供者: AMAZON"
 
 # ユーザー作成の案内
 print_color "yellow" "\nユーザー '$USERNAME' を作成してください"
@@ -228,18 +218,34 @@ if [[ $(echo "$workspaces" | jq length) -gt 0 ]]; then
     
     print_color "cyan" "\n=== Ubuntu WorkSpace セットアップガイド ==="
     echo "  Ubuntu WorkSpace内で以下を実行してください:"
-    echo "  1. システム更新:"
-    echo "     sudo apt update && sudo apt upgrade -y"
-    echo "  2. 必要なパッケージインストール:"
-    echo "     sudo apt install -y curl wget git build-essential"
-    echo "  3. Node.js インストール (Kiro用):"
-    echo "     curl -fsSL https://deb.nodesource.com/setup_lts.x | sudo -E bash -"
-    echo "     sudo apt install -y nodejs"
-    echo "  4. Kiro IDE インストール:"
-    echo "     # Kiro公式サイトからLinux版をダウンロード・インストール"
-    echo "  5. サンプルプロジェクト配置:"
-    echo "     mkdir -p ~/Desktop/Kiro-Samples"
-    echo "     # サンプルファイルを配置"
+    echo ""
+    echo "  【自動セットアップスクリプト実行（推奨）】"
+    echo "  1. GitHubからリポジトリをクローン:"
+    echo "     git clone https://github.com/ttonogai/aws-workspaces-ubuntu-seminar.git"
+    echo "     cd aws-workspaces-ubuntu-seminar"
+    echo ""
+    echo "  2. スクリプトに実行権限を付与:"
+    echo "     chmod +x scripts/setup-golden-workspace.sh"
+    echo ""
+    echo "  3. セットアップスクリプトを実行:"
+    echo "     ./scripts/setup-golden-workspace.sh"
+    echo ""
+    echo "  【事前準備】"
+    echo "  - Kiro IDE の .deb ファイルをブラウザでダウンロード"
+    echo "    1. https://kiro.dev にアクセス"
+    echo "    2. Linux版 (.deb) をダウンロード"
+    echo "    3. ダウンロードフォルダに保存"
+    echo ""
+    echo "  【スクリプトの実行内容】"
+    echo "  - システム更新とパッケージインストール"
+    echo "  - 日本語対応設定（最小限）"
+    echo "  - Node.js LTS インストール"
+    echo "  - Kiro IDE インストール"
+    echo "  - サンプルプロジェクト作成"
+    echo "  - 新規ユーザー用テンプレート設定"
+    echo "  - Dock お気に入り設定"
+    echo ""
+    echo "  【所要時間】約15-30分"
 else
     print_color "yellow" "⚠ WorkSpace情報の取得に失敗しました"
     echo "  管理コンソールで確認してください"
