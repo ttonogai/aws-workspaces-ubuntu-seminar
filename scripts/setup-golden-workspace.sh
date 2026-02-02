@@ -773,21 +773,44 @@ EOF
         if echo "$CURRENT_FAVORITES" | grep -q "kiro.desktop"; then
             log_info "Kiro は既にお気に入りに追加されています"
         else
-            # お気に入りに追加（基本的なアプリと一緒に）
-            NEW_FAVORITES="['firefox.desktop', 'org.gnome.Nautilus.desktop', 'org.gnome.Terminal.desktop', 'kiro.desktop', 'org.gnome.gedit.desktop', 'org.gnome.Calculator.desktop']"
+            # 既存のお気に入りを保持しつつKiroを追加
+            if [[ "$CURRENT_FAVORITES" == "[]" ]] || [[ -z "$CURRENT_FAVORITES" ]]; then
+                # デフォルトのお気に入りが空の場合、推奨構成を設定
+                NEW_FAVORITES="['firefox.desktop', 'org.gnome.Nautilus.desktop', 'org.gnome.Terminal.desktop', 'kiro.desktop', 'org.gnome.gedit.desktop', 'org.gnome.Calculator.desktop']"
+            else
+                # 既存のお気に入りにKiroを追加（最後の]の前に挿入）
+                NEW_FAVORITES=$(echo "$CURRENT_FAVORITES" | sed "s/]$/, 'kiro.desktop']/")
+            fi
             
             if gsettings set org.gnome.shell favorite-apps "$NEW_FAVORITES" 2>/dev/null; then
                 log_success "gsettings でお気に入りに追加しました"
+                log_info "新しいお気に入り: $NEW_FAVORITES"
             else
                 log_warning "gsettings でのお気に入り追加に失敗"
             fi
         fi
     fi
     
-    # 方法2: dconf を直接使用
+    # 方法2: dconf を直接使用（既存設定を保持）
     if command -v dconf &> /dev/null; then
         log_info "dconf を使用してお気に入り設定を試行中..."
-        dconf write /org/gnome/shell/favorite-apps "['firefox.desktop', 'org.gnome.Nautilus.desktop', 'org.gnome.Terminal.desktop', 'kiro.desktop', 'org.gnome.gedit.desktop', 'org.gnome.Calculator.desktop']" 2>/dev/null || log_warning "dconf 設定に失敗"
+        
+        # 現在のdconf設定を確認
+        CURRENT_DCONF=$(dconf read /org/gnome/shell/favorite-apps 2>/dev/null || echo "[]")
+        
+        if echo "$CURRENT_DCONF" | grep -q "kiro.desktop"; then
+            log_info "dconf: Kiro は既にお気に入りに追加されています"
+        else
+            # 既存設定を保持しつつKiroを追加
+            if [[ "$CURRENT_DCONF" == "[]" ]] || [[ -z "$CURRENT_DCONF" ]]; then
+                # デフォルト構成を設定
+                dconf write /org/gnome/shell/favorite-apps "['firefox.desktop', 'org.gnome.Nautilus.desktop', 'org.gnome.Terminal.desktop', 'kiro.desktop', 'org.gnome.gedit.desktop', 'org.gnome.Calculator.desktop']" 2>/dev/null || log_warning "dconf 設定に失敗"
+            else
+                # 既存設定にKiroを追加
+                NEW_DCONF=$(echo "$CURRENT_DCONF" | sed "s/]$/, 'kiro.desktop']/")
+                dconf write /org/gnome/shell/favorite-apps "$NEW_DCONF" 2>/dev/null || log_warning "dconf 設定に失敗"
+            fi
+        fi
     fi
     
     # 方法3: 新規ユーザー用のデフォルト設定を強化
