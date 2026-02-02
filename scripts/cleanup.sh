@@ -328,25 +328,72 @@ fi
 print_color "yellow" "\n削除中: $PROJECT_NAME-network"
 
 if aws cloudformation describe-stacks --stack-name "$PROJECT_NAME-network" --region "$REGION" &>/dev/null; then
+    # Directory削除完了を確認してからNetwork削除を実行
+    print_color "yellow" "Directory削除完了を確認中..."
+    
+    # Directory削除完了を最大10分待機
+    directory_wait_count=0
+    max_directory_wait=60  # 10分 (10秒 × 60回)
+    
+    while [[ $directory_wait_count -lt $max_directory_wait ]]; do
+        if ! aws cloudformation describe-stacks --stack-name "$PROJECT_NAME-directory" --region "$REGION" &>/dev/null; then
+            print_color "green" "✓ Directory削除完了を確認"
+            break
+        fi
+        
+        print_color "yellow" "  Directory削除待機中... ($(($directory_wait_count * 10))秒経過)"
+        sleep 10
+        directory_wait_count=$((directory_wait_count + 1))
+    done
+    
+    if [[ $directory_wait_count -ge $max_directory_wait ]]; then
+        print_color "yellow" "⚠ Directory削除完了の確認がタイムアウトしました"
+        print_color "yellow" "  Network削除を試行しますが、失敗する可能性があります"
+    fi
+    
+    # Network Stack削除実行
     aws cloudformation delete-stack \
         --stack-name "$PROJECT_NAME-network" \
         --region "$REGION"
     
     if [[ $? -eq 0 ]]; then
         print_color "yellow" "削除リクエスト送信"
-        print_color "yellow" "削除完了を待機中..."
+        print_color "yellow" "削除完了を待機中（最大15分）..."
         
-        # Network Stackの削除完了を待機（Directory削除後なので通常は成功）
-        if aws cloudformation wait stack-delete-complete \
+        # Network Stackの削除完了を待機（タイムアウト付き）
+        if timeout 900 aws cloudformation wait stack-delete-complete \
             --stack-name "$PROJECT_NAME-network" \
             --region "$REGION" 2>/dev/null; then
             print_color "green" "✓ 削除完了"
         else
             print_color "yellow" "⚠ 削除タイムアウトまたは進行中"
-            print_color "yellow" "  手動確認: aws cloudformation describe-stacks --stack-name $PROJECT_NAME-network --region $REGION"
+            
+            # 現在の状態を確認
+            stack_status=$(aws cloudformation describe-stacks \
+                --stack-name "$PROJECT_NAME-network" \
+                --region "$REGION" \
+                --query "Stacks[0].StackStatus" \
+                --output text 2>/dev/null || echo "NOT_FOUND")
+            
+            if [[ "$stack_status" == "DELETE_IN_PROGRESS" ]]; then
+                print_color "yellow" "  削除は進行中です。バックグラウンドで完了します。"
+            elif [[ "$stack_status" == "NOT_FOUND" ]]; then
+                print_color "green" "✓ 削除完了（確認済み）"
+            else
+                print_color "red" "  削除に問題が発生している可能性があります"
+                print_color "yellow" "  手動確認: aws cloudformation describe-stacks --stack-name $PROJECT_NAME-network --region $REGION"
+            fi
         fi
     else
         print_color "red" "✗ 削除リクエスト失敗"
+        
+        # 削除失敗の理由を確認
+        stack_status=$(aws cloudformation describe-stacks \
+            --stack-name "$PROJECT_NAME-network" \
+            --region "$REGION" \
+            --query "Stacks[0].StackStatus" \
+            --output text 2>/dev/null || echo "UNKNOWN")
+        print_color "yellow" "  現在の状態: $stack_status"
     fi
 else
     echo "スタックが存在しません（スキップ）"
