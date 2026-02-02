@@ -79,7 +79,7 @@ get_bundles_with_retry() {
     local attempt=1
     
     while [[ $attempt -le $max_attempts ]]; do
-        print_color "yellow" "Bundle情報取得中... (試行 $attempt/$max_attempts)"
+        echo "Bundle情報取得中... (試行 $attempt/$max_attempts)" >&2
         
         # カスタムBundle（kiro-ubuntu-seminar-bundle）を検索
         bundle_result=$(aws workspaces describe-workspace-bundles \
@@ -89,22 +89,22 @@ get_bundles_with_retry() {
         
         local exit_code=$?
         
-        if [[ $exit_code -eq 0 ]]; then
+        if [[ $exit_code -eq 0 ]] && [[ -n "$bundle_result" ]] && [[ "$bundle_result" != "None" ]]; then
             echo "$bundle_result"
             return 0
         elif [[ $exit_code -eq 254 ]] || grep -q "ThrottlingException\|Rate exceeded" <<< "$bundle_result" 2>/dev/null; then
-            print_color "yellow" "⚠ レート制限に達しました。${wait_time}秒待機中..."
+            echo "⚠ レート制限に達しました。${wait_time}秒待機中..." >&2
             sleep $wait_time
             wait_time=$((wait_time * 2))  # 指数バックオフ
             attempt=$((attempt + 1))
         else
-            print_color "red" "✗ Bundle情報の取得に失敗しました (試行 $attempt)"
+            echo "✗ Bundle情報の取得に失敗しました (試行 $attempt)" >&2
             attempt=$((attempt + 1))
             sleep 5
         fi
     done
     
-    print_color "red" "✗ Bundle情報の取得に失敗しました（最大試行回数に達しました）"
+    echo "✗ Bundle情報の取得に失敗しました（最大試行回数に達しました）" >&2
     return 1
 }
 
@@ -148,12 +148,13 @@ fi
 
 # カスタムBundle確認
 print_color "yellow" "\nカスタムBundleを確認中..."
+
 bundle_info=$(aws workspaces describe-workspace-bundles \
     --bundle-ids "$BUNDLE_ID" \
     --region "$REGION" \
     --output json 2>/dev/null)
 
-if [[ $? -ne 0 ]] || [[ $(echo "$bundle_info" | jq '.Bundles | length') -eq 0 ]]; then
+if [[ $? -ne 0 ]] || [[ $(echo "$bundle_info" | jq '.Bundles | length' 2>/dev/null || echo 0) -eq 0 ]]; then
     print_color "red" "✗ カスタムBundle '$BUNDLE_ID' が見つかりません"
     exit 1
 fi
