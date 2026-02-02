@@ -119,6 +119,9 @@ EOF
     # GNOME 設定（デスクトップ環境用）
     gsettings set org.gnome.desktop.input-sources sources "[('xkb', 'jp')]" 2>/dev/null || log_warning "GNOME キーボード設定に失敗（手動設定が必要な場合があります）"
     
+    # dconf直接設定（より確実）
+    dconf write /org/gnome/desktop/input-sources/sources "[('xkb', 'jp')]" 2>/dev/null || log_warning "dconf設定に失敗"
+    
     # 新規ユーザー用のデフォルト設定
     sudo mkdir -p /etc/skel/.config/dconf
     sudo tee -a /etc/skel/.config/dconf/user.txt > /dev/null << 'EOF'
@@ -126,6 +129,34 @@ EOF
 # キーボード設定
 [org/gnome/desktop/input-sources]
 sources=[('xkb', 'jp'), ('ibus', 'mozc-jp')]
+EOF
+    
+    # 新規ユーザー用の自動起動設定
+    sudo mkdir -p /etc/skel/.config/autostart
+    sudo tee /etc/skel/.config/autostart/japanese-keyboard.desktop > /dev/null << 'EOF'
+[Desktop Entry]
+Type=Application
+Name=Japanese Keyboard Setup
+Comment=Set Japanese keyboard layout on login
+Exec=/bin/bash -c 'sleep 5 && setxkbmap jp && gsettings set org.gnome.desktop.input-sources sources "[(\\"xkb\\", \\"jp\\")]"'
+Hidden=false
+NoDisplay=true
+X-GNOME-Autostart-enabled=true
+EOF
+    
+    # 新規ユーザー用の.xprofile設定
+    sudo tee /etc/skel/.xprofile > /dev/null << 'EOF'
+# 日本語キーボード設定
+setxkbmap jp
+EOF
+    
+    # 新規ユーザー用の.bashrc追加設定
+    sudo tee -a /etc/skel/.bashrc > /dev/null << 'EOF'
+
+# 日本語キーボード設定
+if [ -n "$DISPLAY" ]; then
+    setxkbmap jp 2>/dev/null || true
+fi
 EOF
     
     log_success "日本語対応設定完了"
