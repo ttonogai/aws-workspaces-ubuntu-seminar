@@ -12,14 +12,20 @@ Kiroハンズオン用のUbuntu AWS WorkSpaces環境を構築するためのス�
 - **強化されたDock設定**: 7つの方法でKiroお気に入り設定を自動化
 - **ブラウザアクセス対応**: WorkSpacesクライアント不要
 
-## 🔄 最新の改善点（v1.2）
+## 🔄 最新の改善点（v1.3）
 
-### API Rate Limiting対応
+### Cleanup Script 依存関係修正
+- **Directory削除進行中の検出**: Directory削除が進行中の場合、Network削除をスキップ
+- **適切なタイミング制御**: Directory削除完了後にNetwork削除を実行する手順を表示
+- **専用Network削除スクリプト**: `cleanup-network-only.sh` でDirectory削除完了後のNetwork削除を実行
+- **ハング問題解決**: cleanup.sh が "削除完了を待機中" で停止する問題を修正
+
+### API Rate Limiting対応（v1.2）
 - **自動リトライ機能**: AWS API呼び出し時のThrottlingExceptionを自動的に処理
 - **指数バックオフ**: 10秒 → 20秒 → 40秒の待機時間で最大3回リトライ
 - **対象スクリプト**: `create-golden-workspace.sh`, `create-custom-bundle.sh`, `create-user-workspaces.sh`
 
-### Dock お気に入り設定の強化
+### Dock お気に入り設定の強化（v1.2）
 - **7つの設定方法**: 複数のアプローチでKiroのDockお気に入り設定を確実に実行
   1. gsettings による即座の設定
   2. dconf による直接設定
@@ -29,7 +35,7 @@ Kiroハンズオン用のUbuntu AWS WorkSpaces環境を構築するためのス�
   6. bashrc プロファイル設定
   7. 現在セッションでの即座適用
 
-### テスト用スクリプト追加
+### テスト用スクリプト追加（v1.2）
 - `test-api-rate-limiting.sh`: API Rate Limiting対応の動作確認
 - `test-dock-setup.sh`: Dock設定の動作確認とトラブルシューティング
 
