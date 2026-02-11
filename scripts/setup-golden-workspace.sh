@@ -183,7 +183,6 @@ EOF
     # 入力メソッドを設定
     gsettings set org.gnome.desktop.input-sources sources "[('xkb', 'jp'), ('ibus', 'mozc-jp')]" 2>/dev/null || log_warning "GNOME入力ソース設定に失敗"
     dconf write /org/gnome/desktop/input-sources/sources "[('xkb', 'jp'), ('ibus', 'mozc-jp')]" 2>/dev/null || log_warning "dconf入力ソース設定に失敗"
-EOF
     
     # 日本語入力環境変数設定
     log_info "日本語入力環境変数を設定中..."
