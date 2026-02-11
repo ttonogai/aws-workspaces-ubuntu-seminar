@@ -45,9 +45,8 @@ confirm_execution() {
     echo "  2. 日本語対応設定（最小限）"
     echo "  3. Node.js LTS インストール"
     echo "  4. Kiro IDE インストール"
-    echo "  5. サンプルプロジェクト作成"
-    echo "  6. 新規ユーザー用テンプレート設定"
-    echo "  7. Dock お気に入り設定"
+    echo "  5. 新規ユーザー用テンプレート設定"
+    echo "  6. Dock お気に入り設定"
     echo
     read -p "続行しますか？ (y/N): " -n 1 -r
     echo
@@ -131,14 +130,14 @@ EOF
 sources=[('xkb', 'jp'), ('ibus', 'mozc-jp')]
 EOF
     
-    # 新規ユーザー用の自動起動設定
+    # 新規ユーザー用の自動起動設定（日本語入力対応版）
     sudo mkdir -p /etc/skel/.config/autostart
-    sudo tee /etc/skel/.config/autostart/japanese-keyboard.desktop > /dev/null << 'EOF'
+    sudo tee /etc/skel/.config/autostart/japanese-input.desktop > /dev/null << 'EOF'
 [Desktop Entry]
 Type=Application
-Name=Japanese Keyboard Setup
-Comment=Set Japanese keyboard layout on login
-Exec=/bin/bash -c 'sleep 5 && setxkbmap jp && gsettings set org.gnome.desktop.input-sources sources "[(\\"xkb\\", \\"jp\\")]"'
+Name=Japanese Input Setup
+Comment=Setup Japanese keyboard and input method
+Exec=/bin/bash -c 'sleep 5 && export GTK_IM_MODULE=ibus && export QT_IM_MODULE=ibus && export XMODIFIERS=@im=ibus && setxkbmap jp && ibus-daemon -drx && sleep 2 && gsettings set org.gnome.desktop.input-sources sources "[(\\"xkb\\", \\"jp\\"), (\\"ibus\\", \\"mozc-jp\\")]"'
 Hidden=false
 NoDisplay=true
 X-GNOME-Autostart-enabled=true
@@ -148,23 +147,82 @@ EOF
     sudo tee /etc/skel/.xprofile > /dev/null << 'EOF'
 # 日本語キーボード設定
 setxkbmap jp
+
+# 日本語入力環境変数
+export GTK_IM_MODULE=ibus
+export QT_IM_MODULE=ibus
+export XMODIFIERS=@im=ibus
+
+# IBus自動起動
+ibus-daemon -drx
 EOF
     
-    # 新規ユーザー用の.bashrc追加設定
+    # 現在のユーザーにも適用
+    if [ ! -f ~/.xprofile ] || ! grep -q "ibus-daemon" ~/.xprofile; then
+        cat >> ~/.xprofile << 'EOF'
+# 日本語キーボード設定
+setxkbmap jp
+
+# 日本語入力環境変数
+export GTK_IM_MODULE=ibus
+export QT_IM_MODULE=ibus
+export XMODIFIERS=@im=ibus
+
+# IBus自動起動
+ibus-daemon -drx
+EOF
+    fi
+    
+    # IBusを現在のセッションで起動
+    log_info "IBusを起動中..."
+    killall ibus-daemon 2>/dev/null || true
+    sleep 2
+    ibus-daemon -drx
+    sleep 3
+    
+    # 入力メソッドを設定
+    gsettings set org.gnome.desktop.input-sources sources "[('xkb', 'jp'), ('ibus', 'mozc-jp')]" 2>/dev/null || log_warning "GNOME入力ソース設定に失敗"
+    dconf write /org/gnome/desktop/input-sources/sources "[('xkb', 'jp'), ('ibus', 'mozc-jp')]" 2>/dev/null || log_warning "dconf入力ソース設定に失敗"
+EOF
+    
+    # 日本語入力環境変数設定
+    log_info "日本語入力環境変数を設定中..."
+    
+    # 新規ユーザー用の環境変数設定
     sudo tee -a /etc/skel/.bashrc > /dev/null << 'EOF'
+
+# 日本語入力環境変数
+export GTK_IM_MODULE=ibus
+export QT_IM_MODULE=ibus
+export XMODIFIERS=@im=ibus
 
 # 日本語キーボード設定
 if [ -n "$DISPLAY" ]; then
     setxkbmap jp 2>/dev/null || true
 fi
 EOF
+
+    # 現在のユーザーにも環境変数を設定
+    cat >> ~/.bashrc << 'EOF'
+
+# 日本語入力環境変数
+export GTK_IM_MODULE=ibus
+export QT_IM_MODULE=ibus
+export XMODIFIERS=@im=ibus
+EOF
+
+    # 現在のセッションに環境変数を適用
+    export GTK_IM_MODULE=ibus
+    export QT_IM_MODULE=ibus
+    export XMODIFIERS=@im=ibus
     
     log_success "日本語対応設定完了"
-    log_info "日本語キーボード: 設定済み（再ログイン後に有効）"
-    log_info "日本語入力を有効にするには、ログイン後に以下を実行してください："
-    log_info "  1. 画面右上の設定アイコン → Settings"
-    log_info "  2. Region & Language → Input Sources → + → Japanese (Mozc)"
-    log_info "  または Super+Space キーで入力切り替え"
+    log_info "日本語キーボード: 設定済み"
+    log_info "日本語入力メソッド: IBus + Mozc 設定済み"
+    log_info "日本語入力切り替え方法:"
+    log_info "  - Super + Space: 入力メソッド切り替え"
+    log_info "  - 画面右上のインジケーター: ENまたは「あ」をクリック"
+    log_info "  - ブラウザアクセス時: 画面右上のインジケーター推奨"
 }
 
 # Step 3: Node.js インストール
@@ -237,409 +295,9 @@ install_kiro() {
     fi
 }
 
-# Step 5: サンプルプロジェクト作成
-create_sample_projects() {
-    log_info "Step 5: サンプルプロジェクト作成"
-    
-    # 全ユーザー用のサンプルディレクトリ作成
-    sudo mkdir -p /opt/kiro-samples
-    sudo chown -R $(whoami) /opt/kiro-samples
-    
-    cd /opt/kiro-samples
-    
-    # AWS CDKサンプル
-    log_info "AWS CDK サンプルプロジェクト作成中..."
-    mkdir -p aws-cdk-sample
-    cd aws-cdk-sample
-    
-    cat > README.md << 'EOF'
-# AWS CDK Sample Project
-
-Kiro セミナー用の AWS CDK サンプルプロジェクトです。
-
-## 概要
-このプロジェクトは AWS CDK を使用してクラウドインフラストラクチャをコードで定義・デプロイするサンプルです。
-
-## 前提条件
-- Node.js (v18以上)
-- AWS CLI 設定済み
-- AWS CDK CLI
-
-## セットアップ手順
-
-1. 依存関係のインストール:
-   ```bash
-   npm install
-   ```
-
-2. CDK のブートストラップ（初回のみ）:
-   ```bash
-   npx cdk bootstrap
-   ```
-
-3. スタックのデプロイ:
-   ```bash
-   npx cdk deploy
-   ```
-
-4. スタックの削除:
-   ```bash
-   npx cdk destroy
-   ```
-
-## プロジェクト構成
-- `lib/` - CDK スタック定義
-- `bin/` - CDK アプリケーションエントリーポイント
-- `test/` - テストファイル
-
-## 学習リソース
-- [AWS CDK ドキュメント](https://docs.aws.amazon.com/cdk/)
-- [CDK Workshop](https://cdkworkshop.com/)
-EOF
-
-    cat > package.json << 'EOF'
-{
-  "name": "aws-cdk-sample",
-  "version": "1.0.0",
-  "description": "Sample AWS CDK project for Kiro seminar",
-  "main": "index.js",
-  "scripts": {
-    "build": "tsc",
-    "watch": "tsc -w",
-    "test": "jest",
-    "cdk": "cdk"
-  },
-  "devDependencies": {
-    "@types/node": "^20.0.0",
-    "typescript": "^5.0.0",
-    "aws-cdk": "^2.0.0",
-    "jest": "^29.0.0",
-    "@types/jest": "^29.0.0"
-  },
-  "dependencies": {
-    "aws-cdk-lib": "^2.0.0",
-    "constructs": "^10.0.0"
-  }
-}
-EOF
-
-    # TypeScript設定
-    cat > tsconfig.json << 'EOF'
-{
-  "compilerOptions": {
-    "target": "ES2020",
-    "module": "commonjs",
-    "lib": ["es2020"],
-    "declaration": true,
-    "strict": true,
-    "noImplicitAny": true,
-    "strictNullChecks": true,
-    "noImplicitThis": true,
-    "alwaysStrict": true,
-    "noUnusedLocals": false,
-    "noUnusedParameters": false,
-    "noImplicitReturns": true,
-    "noFallthroughCasesInSwitch": false,
-    "inlineSourceMap": true,
-    "inlineSources": true,
-    "experimentalDecorators": true,
-    "strictPropertyInitialization": false,
-    "typeRoots": ["./node_modules/@types"]
-  },
-  "exclude": ["cdk.out"]
-}
-EOF
-
-    cd ..
-    
-    # Node.js Express サンプル
-    log_info "Node.js Express サンプルプロジェクト作成中..."
-    mkdir -p nodejs-express-sample
-    cd nodejs-express-sample
-    
-    cat > app.js << 'EOF'
-const express = require('express');
-const path = require('path');
-const app = express();
-const port = 3000;
-
-// 静的ファイルの提供
-app.use(express.static('public'));
-
-// JSON パースミドルウェア
-app.use(express.json());
-
-// ルート
-app.get('/', (req, res) => {
-  res.send(`
-    <h1>Kiro セミナーへようこそ！</h1>
-    <p>このサンプルアプリケーションは Node.js + Express で作成されています。</p>
-    <ul>
-      <li><a href="/api/hello">API テスト</a></li>
-      <li><a href="/api/time">現在時刻</a></li>
-    </ul>
-  `);
-});
-
-// API エンドポイント
-app.get('/api/hello', (req, res) => {
-  res.json({ 
-    message: 'Hello from Kiro Seminar!',
-    timestamp: new Date().toISOString(),
-    environment: 'Ubuntu WorkSpaces'
-  });
-});
-
-app.get('/api/time', (req, res) => {
-  res.json({ 
-    currentTime: new Date().toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' }),
-    timezone: 'Asia/Tokyo'
-  });
-});
-
-// サーバー起動
-app.listen(port, () => {
-  console.log(`🚀 Server running at http://localhost:${port}`);
-  console.log(`📝 API endpoints:`);
-  console.log(`   GET /api/hello`);
-  console.log(`   GET /api/time`);
-});
-EOF
-
-    cat > package.json << 'EOF'
-{
-  "name": "nodejs-express-sample",
-  "version": "1.0.0",
-  "description": "Sample Node.js Express project for Kiro seminar",
-  "main": "app.js",
-  "scripts": {
-    "start": "node app.js",
-    "dev": "nodemon app.js",
-    "test": "jest"
-  },
-  "dependencies": {
-    "express": "^4.18.0"
-  },
-  "devDependencies": {
-    "nodemon": "^3.0.0",
-    "jest": "^29.0.0"
-  }
-}
-EOF
-
-    cat > README.md << 'EOF'
-# Node.js Express Sample
-
-Kiro セミナー用の Node.js + Express サンプルアプリケーションです。
-
-## 機能
-- 基本的な Web サーバー
-- REST API エンドポイント
-- 静的ファイル配信
-
-## セットアップ
-
-1. 依存関係のインストール:
-   ```bash
-   npm install
-   ```
-
-2. 開発サーバー起動:
-   ```bash
-   npm run dev
-   ```
-
-3. 本番サーバー起動:
-   ```bash
-   npm start
-   ```
-
-## API エンドポイント
-- `GET /` - ホームページ
-- `GET /api/hello` - Hello API
-- `GET /api/time` - 現在時刻 API
-
-## アクセス
-ブラウザで http://localhost:3000 にアクセスしてください。
-EOF
-
-    cd ..
-    
-    # Python Flask サンプル
-    log_info "Python Flask サンプルプロジェクト作成中..."
-    mkdir -p python-flask-sample
-    cd python-flask-sample
-    
-    cat > app.py << 'EOF'
-from flask import Flask, jsonify, render_template_string
-from datetime import datetime
-import os
-
-app = Flask(__name__)
-
-# HTML テンプレート
-HOME_TEMPLATE = '''
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Kiro セミナー - Python Flask Sample</title>
-    <style>
-        body { font-family: Arial, sans-serif; margin: 40px; }
-        h1 { color: #333; }
-        ul { list-style-type: none; padding: 0; }
-        li { margin: 10px 0; }
-        a { color: #007bff; text-decoration: none; }
-        a:hover { text-decoration: underline; }
-    </style>
-</head>
-<body>
-    <h1>Kiro セミナーへようこそ！</h1>
-    <p>このサンプルアプリケーションは Python + Flask で作成されています。</p>
-    <ul>
-        <li><a href="/api/hello">API テスト</a></li>
-        <li><a href="/api/time">現在時刻</a></li>
-        <li><a href="/api/system">システム情報</a></li>
-    </ul>
-</body>
-</html>
-'''
-
-@app.route('/')
-def home():
-    return render_template_string(HOME_TEMPLATE)
-
-@app.route('/api/hello')
-def hello():
-    return jsonify({
-        'message': 'Hello from Kiro Seminar!',
-        'framework': 'Flask',
-        'language': 'Python',
-        'timestamp': datetime.now().isoformat(),
-        'environment': 'Ubuntu WorkSpaces'
-    })
-
-@app.route('/api/time')
-def current_time():
-    return jsonify({
-        'currentTime': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-        'timezone': 'Asia/Tokyo',
-        'iso': datetime.now().isoformat()
-    })
-
-@app.route('/api/system')
-def system_info():
-    return jsonify({
-        'python_version': os.sys.version,
-        'platform': os.name,
-        'cwd': os.getcwd(),
-        'environment_variables': dict(os.environ)
-    })
-
-if __name__ == '__main__':
-    print('🚀 Flask server starting...')
-    print('📝 API endpoints:')
-    print('   GET /')
-    print('   GET /api/hello')
-    print('   GET /api/time')
-    print('   GET /api/system')
-    app.run(debug=True, host='0.0.0.0', port=5000)
-EOF
-
-    cat > requirements.txt << 'EOF'
-Flask==2.3.3
-Werkzeug==2.3.7
-EOF
-
-    cat > README.md << 'EOF'
-# Python Flask Sample
-
-Kiro セミナー用の Python + Flask サンプルアプリケーションです。
-
-## 機能
-- 基本的な Web サーバー
-- REST API エンドポイント
-- JSON レスポンス
-- システム情報表示
-
-## セットアップ
-
-1. 仮想環境作成（推奨）:
-   ```bash
-   python3 -m venv venv
-   source venv/bin/activate
-   ```
-
-2. 依存関係のインストール:
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-3. サーバー起動:
-   ```bash
-   python app.py
-   ```
-
-## API エンドポイント
-- `GET /` - ホームページ
-- `GET /api/hello` - Hello API
-- `GET /api/time` - 現在時刻 API
-- `GET /api/system` - システム情報 API
-
-## アクセス
-ブラウザで http://localhost:5000 にアクセスしてください。
-EOF
-
-    cd ..
-    
-    # メインの README 作成
-    cat > README.md << 'EOF'
-# Kiro セミナー サンプルプロジェクト集
-
-Ubuntu WorkSpaces 環境でのKiroセミナー用サンプルプロジェクトです。
-
-## 含まれるサンプル
-
-### 1. AWS CDK Sample (`aws-cdk-sample/`)
-- AWS CDK を使用したインフラストラクチャ as Code
-- TypeScript で記述
-- AWS リソースのデプロイ・管理
-
-### 2. Node.js Express Sample (`nodejs-express-sample/`)
-- Node.js + Express による Web アプリケーション
-- REST API の実装例
-- 静的ファイル配信
-
-### 3. Python Flask Sample (`python-flask-sample/`)
-- Python + Flask による Web アプリケーション
-- REST API の実装例
-- システム情報表示
-
-## 使用方法
-
-1. 各プロジェクトフォルダに移動
-2. README.md の手順に従ってセットアップ
-3. Kiro IDE でプロジェクトを開いて開発開始
-
-## 環境情報
-- OS: Ubuntu 22.04 LTS
-- Node.js: LTS版
-- Python: 3.10+
-- Kiro IDE: 最新版
-
-## サポート
-質問や問題がある場合は、講師にお声がけください。
-
-楽しいセミナーをお過ごしください！ 🚀
-EOF
-    
-    log_success "サンプルプロジェクト作成完了"
-    log_info "作成されたプロジェクト:"
-    tree /opt/kiro-samples -L 2 || ls -la /opt/kiro-samples
-}
-
-# Step 6: 新規ユーザー用テンプレート設定
+# Step 5: 新規ユーザー用テンプレート設定
 setup_user_templates() {
-    log_info "Step 6: 新規ユーザー用テンプレート設定"
+    log_info "Step 5: 新規ユーザー用テンプレート設定"
     
     # /etc/skel にテンプレートファイルを配置
     # 新規ユーザー作成時に自動的にホームディレクトリにコピーされる
@@ -647,23 +305,13 @@ setup_user_templates() {
     # デスクトップディレクトリ作成
     sudo mkdir -p /etc/skel/Desktop
     
-    # サンプルプロジェクトへのシンボリックリンク作成
-    sudo ln -sf /opt/kiro-samples /etc/skel/Desktop/Kiro-Samples || log_warning "シンボリックリンク作成に失敗（継続します）"
-    
     # README ファイル作成
     sudo tee /etc/skel/Desktop/README.txt > /dev/null << 'EOF'
 🚀 Kiro Ubuntu セミナー環境へようこそ！
 
 ## 開始方法
 1. 左のメニューバー（Dock）から Kiro IDE を起動
-2. デスクトップの「Kiro-Samples」フォルダでサンプルプロジェクトを確認
-3. 好きなプロジェクトを Kiro で開いて開発開始！
-
-## サンプルプロジェクト
-📁 Kiro-Samples/
-  ├── aws-cdk-sample/        - AWS CDK プロジェクト
-  ├── nodejs-express-sample/ - Node.js + Express
-  └── python-flask-sample/   - Python + Flask
+2. 好きな場所に新しいプロジェクトを作成して開発開始！
 
 ## 環境情報
 - OS: Ubuntu 22.04 LTS (英語UI + 日本語入力対応)
@@ -689,15 +337,14 @@ EOF
     
     # 現在のユーザーのデスクトップにもコピー
     mkdir -p ~/Desktop
-    ln -sf /opt/kiro-samples ~/Desktop/Kiro-Samples || log_warning "現在ユーザーのシンボリックリンク作成に失敗"
     cp /etc/skel/Desktop/README.txt ~/Desktop/ || log_warning "現在ユーザーのREADME作成に失敗"
     
     log_success "新規ユーザー用テンプレート設定完了"
 }
 
-# Step 7: Dock お気に入り設定（強化版）
+# Step 6: Dock お気に入り設定（強化版）
 setup_dock_favorites() {
-    log_info "Step 7: Dock お気に入り設定（強化版）"
+    log_info "Step 6: Dock お気に入り設定（強化版）"
     
     # Kiro IDE のデスクトップファイルを確認・作成
     KIRO_DESKTOP_FILE=""
@@ -963,9 +610,9 @@ EOF
     log_info ""
 }
 
-# Step 8: 最終確認と動作テスト
+# Step 7: 最終確認と動作テスト
 final_verification() {
-    log_info "Step 8: 最終確認と動作テスト"
+    log_info "Step 7: 最終確認と動作テスト"
     
     echo
     log_info "=== インストール確認 ==="
@@ -999,15 +646,6 @@ final_verification() {
         log_error "Kiro IDE がインストールされていません"
     fi
     
-    # サンプルプロジェクト確認
-    if [ -d "/opt/kiro-samples" ]; then
-        log_success "サンプルプロジェクト: /opt/kiro-samples"
-        log_info "含まれるプロジェクト:"
-        ls -1 /opt/kiro-samples | sed 's/^/  - /'
-    else
-        log_error "サンプルプロジェクトが作成されていません"
-    fi
-    
     # デスクトップファイル確認
     if [ -f ~/Desktop/README.txt ]; then
         log_success "デスクトップ README: 作成済み"
@@ -1015,18 +653,11 @@ final_verification() {
         log_warning "デスクトップ README が作成されていません"
     fi
     
-    if [ -L ~/Desktop/Kiro-Samples ]; then
-        log_success "デスクトップ サンプルリンク: 作成済み"
-    else
-        log_warning "デスクトップ サンプルリンクが作成されていません"
-    fi
-    
     echo
     log_info "=== 次のステップ ==="
     log_info "1. Kiro IDE を起動して動作確認"
-    log_info "2. サンプルプロジェクトを開いて動作確認"
-    log_info "3. 日本語入力設定（必要に応じて）"
-    log_info "4. カスタムイメージ作成の準備"
+    log_info "2. 日本語入力設定（必要に応じて）"
+    log_info "3. カスタムイメージ作成の準備"
     
     echo
     log_success "ゴールデンワークスペース セットアップ完了！"
@@ -1047,7 +678,6 @@ main() {
     setup_japanese_support
     install_nodejs
     install_kiro
-    create_sample_projects
     setup_user_templates
     setup_dock_favorites
     final_verification
